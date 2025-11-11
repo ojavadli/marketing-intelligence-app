@@ -542,7 +542,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="step" id="step1">
                 <div class="step-header" onclick="toggleStep(1)">
                     <div class="step-number">1</div>
-                    <div class="step-title">Profile Analyzer</div>
+                    <div class="step-title">1. Profile Analyzer (Tavily + OpenAI API)</div>
                     <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output1"></div>
@@ -551,7 +551,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="step" id="step2">
                 <div class="step-header" onclick="toggleStep(2)">
                     <div class="step-number">2</div>
-                    <div class="step-title">Keyword Generator</div>
+                    <div class="step-title">2. Keyword Generator (OpenAI API)</div>
                     <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output2"></div>
@@ -560,7 +560,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="step" id="step3">
                 <div class="step-header" onclick="toggleStep(3)">
                     <div class="step-number">3</div>
-                    <div class="step-title">Trend Scraper</div>
+                    <div class="step-title">3. Trend Scraper (Reddit API + OpenAI API)</div>
                     <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output3"></div>
@@ -569,7 +569,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="step" id="step4">
                 <div class="step-header" onclick="toggleStep(4)">
                     <div class="step-number">4</div>
-                    <div class="step-title">Ranking Agent</div>
+                    <div class="step-title">4. Ranking Agent (OpenAI API)</div>
                     <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output4"></div>
@@ -578,7 +578,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="step" id="step5">
                 <div class="step-header" onclick="toggleStep(5)">
                     <div class="step-number">5</div>
-                    <div class="step-title">Report Generator</div>
+                    <div class="step-title">5. Report Generator (OpenAI API)</div>
                     <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output5"></div>
@@ -587,7 +587,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="step" id="step6">
                 <div class="step-header" onclick="toggleStep(6)">
                     <div class="step-number">6</div>
-                    <div class="step-title">Summarizer</div>
+                    <div class="step-title">6. Summarizer & PDF & Excel Generator (OpenAI API)</div>
                     <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output6"></div>
@@ -596,7 +596,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="step" id="step7">
                 <div class="step-header" onclick="toggleStep(7)">
                     <div class="step-number">7</div>
-                    <div class="step-title">Evaluator</div>
+                    <div class="step-title">7. Evaluator (TruLens / OpenAI API)</div>
                     <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output7"></div>
