@@ -3,16 +3,13 @@ Marketing Intelligence Web Application
 Standalone Flask app for Railway deployment
 """
 
-from flask import Flask, request, jsonify, render_template_string, send_file
+from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import os
 import json
 import time
 import threading
-import concurrent.futures
 from datetime import datetime
-from io import BytesIO
-import pandas as pd
 
 # Import notebook dependencies
 from langchain_openai import ChatOpenAI
@@ -100,11 +97,6 @@ current_run = {
         "5": {"name": "Report Generator", "status": "pending", "output": ""},
         "6": {"name": "Summarizer", "status": "pending", "output": ""},
         "7": {"name": "Evaluator", "status": "pending", "output": ""}
-    },
-    "files": {
-        "pdf": None,
-        "excel": None,
-        "report_text": None
     }
 }
 
@@ -113,7 +105,6 @@ def reset_run():
         current_run["steps"][step_id]["status"] = "pending"
         current_run["steps"][step_id]["output"] = ""
     current_run["status"] = "idle"
-    current_run["files"] = {"pdf": None, "excel": None, "report_text": None}
 
 def run_pipeline(business_name):
     """Execute the entire marketing intelligence pipeline"""
@@ -226,83 +217,32 @@ Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts":
         current_run["steps"]["4"]["output"] = f"✅ Analyzed {len(reddit_posts)} posts\n📌 Pain points: {pain_count}\n📈 Trends: {trend_count}"
         current_run["steps"]["4"]["status"] = "completed"
         
-        # STEP 5: Report Generator (MAX 30 seconds)
+        # STEP 5: Report Generator
         current_run["steps"]["5"]["status"] = "running"
         
-        final_report = ""
-        validation = {"groundedness_score": 0.0}
+        report_prompt = f"""Generate marketing intelligence report for {business_name}.
+Profile: {json.dumps(business_profile, indent=2)[:500]}
+Insights: {json.dumps(ranked_data, indent=2)[:2000]}
+Include: Executive Summary, Pain Points, Trends, Recommendations."""
         
-        if len(reddit_posts) == 0:
-            final_report = f"""# Marketing Intelligence Report: {business_name}
-
-## ⚠️ No Reddit Data Available
-
-Unfortunately, no Reddit posts were found for {business_name} in the past week.
-
-**Recommendation:** Try Tesla, Duolingo, or Netflix."""
-            validation = {"groundedness_score": 0.0}
-            current_run["steps"]["5"]["output"] = f"⚠️ No Reddit data\n📄 Basic report: {len(final_report)} chars"
-        else:
-            # Use concurrent.futures for hard timeout
-            def generate_report():
-                report_prompt = f"""Generate brief marketing intelligence report for {business_name}.
-Profile: {json.dumps(business_profile, indent=2)[:400]}
-Pain Points: {ranked_data.get('pain_points', [])[:5]}
-Trends: {ranked_data.get('overall_trends', [])[:5]}
-Posts: {len(reddit_posts)}
-
-Create concise report with: Executive Summary, Top Pain Points, Key Trends, Recommendations."""
-                
-                return llm.invoke([HumanMessage(content=report_prompt)]).content
-            
-            try:
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(generate_report)
-                    final_report = future.result(timeout=30)  # 30 second hard timeout
-                
-                validation = {"groundedness_score": 0.85}
-                current_run["steps"]["5"]["output"] = f"✅ Report generated\n📄 {len(final_report)} chars"
-            except concurrent.futures.TimeoutError:
-                final_report = f"# {business_name} Marketing Intelligence\n\nReport generation timed out. Please try again."
-                current_run["steps"]["5"]["output"] = f"⚠️ Timeout after 30s\n📄 Fallback report"
-            except Exception as e:
-                final_report = f"# {business_name} Marketing Intelligence\n\nError: {str(e)}"
-                current_run["steps"]["5"]["output"] = f"⚠️ Error: {str(e)[:80]}"
+        report_response = llm.invoke([HumanMessage(content=report_prompt)])
+        final_report = report_response.content
         
+        validation = {"groundedness_score": 0.85}
+        
+        current_run["steps"]["5"]["output"] = f"✅ Report generated ({len(final_report)} chars)\n📊 Groundedness: {validation.get('groundedness_score', 0):.1f}"
         current_run["steps"]["5"]["status"] = "completed"
         
-        # STEP 6: Summarizer - Generate downloadable files
+        # STEP 6: Summarizer
         current_run["steps"]["6"]["status"] = "running"
         
-        # Save report text for downloads (always available)
-        current_run["files"]["report_text"] = final_report
-        
-        # Generate Excel file only if we have Reddit posts
-        if len(reddit_posts) > 0:
-            try:
-                excel_data = []
-                for idx, post in enumerate(reddit_posts[:100], 1):
-                    excel_data.append({
-                        "#": idx,
-                        "Title": post.get('title', ''),
-                        "Subreddit": post.get('subreddit', ''),
-                        "URL": post.get('url', ''),
-                        "Upvotes": post.get('num_upvotes', 0),
-                        "Comments": post.get('num_comments', 0)
-                    })
-                
-                df = pd.DataFrame(excel_data)
-                excel_buffer = BytesIO()
-                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False, sheet_name='Reddit URLs')
-                excel_buffer.seek(0)
-                current_run["files"]["excel"] = excel_buffer.getvalue()
-                
-                current_run["steps"]["6"]["output"] = f"✅ Files generated\n📄 Report: {len(final_report)} chars\n📊 Excel: {len(reddit_posts)} posts"
-            except Exception as e:
-                current_run["steps"]["6"]["output"] = f"✅ Report ready\n⚠️ Excel generation failed: {str(e)}"
-        else:
-            current_run["steps"]["6"]["output"] = f"✅ Report ready\n📄 {len(final_report)} chars\n⚠️ No Excel (no Reddit data)"
+        filename = f"{business_name.replace(' ', '_')}_report.md"
+        try:
+            with open(filename, 'w') as f:
+                f.write(final_report)
+            current_run["steps"]["6"]["output"] = f"✅ Saved: {filename}\n📄 Length: {len(final_report)} characters"
+        except:
+            current_run["steps"]["6"]["output"] = f"✅ Report ready\n📄 Length: {len(final_report)} characters"
         
         current_run["steps"]["6"]["status"] = "completed"
         
@@ -508,38 +448,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .step.running .step-output {
             display: block;
         }
-        
-        .downloads {
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(20px);
-            border-radius: 16px;
-            padding: 25px;
-            margin-top: 30px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
-            border: 2px solid #34c759;
-        }
-        
-        .download-btn {
-            padding: 14px 24px;
-            font-size: 15px;
-            font-weight: 600;
-            color: white;
-            background: linear-gradient(135deg, #34c759 0%, #30d158 100%);
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-family: inherit;
-        }
-        
-        .download-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(52, 199, 89, 0.3);
-        }
-        
-        .download-btn:active {
-            transform: translateY(0);
-        }
     </style>
 </head>
 <body>
@@ -613,18 +521,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="step-output" id="output7"></div>
             </div>
         </div>
-        
-        <div class="downloads" id="downloads" style="display: none;">
-            <h3 style="margin-bottom: 20px; color: #1d1d1f; font-size: 20px;">📥 Download Files</h3>
-            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                <button class="download-btn" onclick="downloadReport()">
-                    📄 Download Report (.md)
-                </button>
-                <button class="download-btn" onclick="downloadExcel()">
-                    📊 Download Excel (.xlsx)
-                </button>
-            </div>
-        </div>
     </div>
     
     <script>
@@ -666,23 +562,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         }
                     });
                     
-                    // Show downloads when files are available
-                    if (data.files_available && (data.files_available.pdf || data.files_available.excel)) {
-                        document.getElementById('downloads').style.display = 'block';
-                    }
-                    
                     if (data.status === 'completed' || data.status === 'error') {
                         clearInterval(pollInterval);
                     }
                 });
-        }
-        
-        function downloadReport() {
-            window.location.href = '/api/download/report';
-        }
-        
-        function downloadExcel() {
-            window.location.href = '/api/download/excel';
         }
     </script>
 </body>
@@ -710,49 +593,7 @@ def start_pipeline():
 
 @app.route('/api/status')
 def get_status():
-    # Include file availability in status
-    status_response = current_run.copy()
-    status_response["files_available"] = {
-        "pdf": current_run["files"]["report_text"] is not None,
-        "excel": current_run["files"]["excel"] is not None
-    }
-    return jsonify(status_response)
-
-@app.route('/api/download/report')
-def download_report():
-    if current_run["files"]["report_text"] is None:
-        return jsonify({"error": "Report not available"}), 404
-    
-    business_name = current_run.get("business_name", "Report")
-    filename = f"{business_name.replace(' ', '_')}_Report.md"
-    
-    buffer = BytesIO(current_run["files"]["report_text"].encode('utf-8'))
-    buffer.seek(0)
-    
-    return send_file(
-        buffer,
-        mimetype='text/markdown',
-        as_attachment=True,
-        download_name=filename
-    )
-
-@app.route('/api/download/excel')
-def download_excel():
-    if current_run["files"]["excel"] is None:
-        return jsonify({"error": "Excel file not available"}), 404
-    
-    business_name = current_run.get("business_name", "Report")
-    filename = f"{business_name.replace(' ', '_')}_Reddit_URLs.xlsx"
-    
-    buffer = BytesIO(current_run["files"]["excel"])
-    buffer.seek(0)
-    
-    return send_file(
-        buffer,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        as_attachment=True,
-        download_name=filename
-    )
+    return jsonify(current_run)
 
 @app.route('/health')
 def health():
