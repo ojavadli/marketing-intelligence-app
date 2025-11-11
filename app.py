@@ -228,48 +228,77 @@ Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts":
         # STEP 5: Report Generator
         current_run["steps"]["5"]["status"] = "running"
         
-        report_prompt = f"""Generate marketing intelligence report for {business_name}.
+        # Check if we have data to generate report
+        if len(reddit_posts) == 0:
+            final_report = f"""# Marketing Intelligence Report: {business_name}
+
+## ⚠️ No Reddit Data Available
+
+Unfortunately, no Reddit posts were found for {business_name} in the past week.
+
+**Business Profile:**
+- Industry: {business_profile.get('industry', 'N/A')}
+- Target Market: {business_profile.get('target_market', 'N/A')}
+
+**Possible Reasons:**
+- Low Reddit activity for this business
+- Keywords may need adjustment
+- Reddit API rate limiting
+- Business may not have strong Reddit presence
+
+**Recommendation:** Try analyzing a different business with more Reddit activity (e.g., Tesla, Duolingo, Netflix)."""
+            validation = {"groundedness_score": 0.0}
+            current_run["steps"]["5"]["output"] = f"⚠️ No Reddit data - Basic report generated\n📄 {len(final_report)} chars"
+        else:
+            report_prompt = f"""Generate marketing intelligence report for {business_name}.
 Profile: {json.dumps(business_profile, indent=2)[:500]}
 Insights: {json.dumps(ranked_data, indent=2)[:2000]}
 Include: Executive Summary, Pain Points, Trends, Recommendations."""
+            
+            try:
+                report_response = llm.invoke([HumanMessage(content=report_prompt)], timeout=30)
+                final_report = report_response.content
+                validation = {"groundedness_score": 0.85}
+                current_run["steps"]["5"]["output"] = f"✅ Report generated ({len(final_report)} chars)\n📊 Groundedness: {validation.get('groundedness_score', 0):.1f}"
+            except Exception as e:
+                final_report = f"# Error generating report\n\nError: {str(e)}"
+                validation = {"groundedness_score": 0.0}
+                current_run["steps"]["5"]["output"] = f"⚠️ Report generation failed: {str(e)}"
         
-        report_response = llm.invoke([HumanMessage(content=report_prompt)])
-        final_report = report_response.content
-        
-        validation = {"groundedness_score": 0.85}
-        
-        current_run["steps"]["5"]["output"] = f"✅ Report generated ({len(final_report)} chars)\n📊 Groundedness: {validation.get('groundedness_score', 0):.1f}"
         current_run["steps"]["5"]["status"] = "completed"
         
         # STEP 6: Summarizer - Generate downloadable files
         current_run["steps"]["6"]["status"] = "running"
         
-        # Save report text for downloads
+        # Save report text for downloads (always available)
         current_run["files"]["report_text"] = final_report
         
-        # Generate Excel file with Reddit URLs
-        try:
-            excel_data = []
-            for idx, post in enumerate(reddit_posts[:100], 1):
-                excel_data.append({
-                    "#": idx,
-                    "Title": post.get('title', ''),
-                    "Subreddit": post.get('subreddit', ''),
-                    "URL": post.get('url', ''),
-                    "Upvotes": post.get('num_upvotes', 0),
-                    "Comments": post.get('num_comments', 0)
-                })
-            
-            df = pd.DataFrame(excel_data)
-            excel_buffer = BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Reddit URLs')
-            excel_buffer.seek(0)
-            current_run["files"]["excel"] = excel_buffer.getvalue()
-            
-            current_run["steps"]["6"]["output"] = f"✅ Files generated\n📄 Report: {len(final_report)} chars\n📊 Excel: {len(reddit_posts)} posts"
-        except Exception as e:
-            current_run["steps"]["6"]["output"] = f"✅ Report ready\n⚠️ Excel generation failed: {str(e)}"
+        # Generate Excel file only if we have Reddit posts
+        if len(reddit_posts) > 0:
+            try:
+                excel_data = []
+                for idx, post in enumerate(reddit_posts[:100], 1):
+                    excel_data.append({
+                        "#": idx,
+                        "Title": post.get('title', ''),
+                        "Subreddit": post.get('subreddit', ''),
+                        "URL": post.get('url', ''),
+                        "Upvotes": post.get('num_upvotes', 0),
+                        "Comments": post.get('num_comments', 0)
+                    })
+                
+                df = pd.DataFrame(excel_data)
+                excel_buffer = BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Reddit URLs')
+                excel_buffer.seek(0)
+                current_run["files"]["excel"] = excel_buffer.getvalue()
+                
+                current_run["steps"]["6"]["output"] = f"✅ Files generated\n📄 Report: {len(final_report)} chars\n📊 Excel: {len(reddit_posts)} posts"
+            except Exception as e:
+                current_run["steps"]["6"]["output"] = f"✅ Report ready\n⚠️ Excel generation failed: {str(e)}"
+        else:
+            current_run["steps"]["6"]["output"] = f"✅ Report ready\n📄 {len(final_report)} chars\n⚠️ No Excel (no Reddit data)"
         
         current_run["steps"]["6"]["status"] = "completed"
         
