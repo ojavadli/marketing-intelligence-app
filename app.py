@@ -265,14 +265,12 @@ Include: Executive Summary, Pain Points, Trends, Recommendations."""
         report_response = llm.invoke([HumanMessage(content=report_prompt)])
         final_report = report_response.content
         
-        validation = {"groundedness_score": 0.85}
-        
         # Show report preview
-        report_preview = final_report[:800] + ("..." if len(final_report) > 800 else "")
-        current_run["steps"]["5"]["output"] = f"""✅ Report generated ({len(final_report)} chars)
-📊 Groundedness: {validation.get('groundedness_score', 0):.1f}
+        report_preview = final_report[:1000] + ("..." if len(final_report) > 1000 else "")
+        current_run["steps"]["5"]["output"] = f"""✅ Report generated
+📄 Length: {len(final_report)} characters
 
-📄 Report Preview:
+Report Preview:
 {report_preview}"""
         current_run["steps"]["5"]["status"] = "completed"
         
