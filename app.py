@@ -141,7 +141,24 @@ Return JSON: {{"business_name": "{business_name}", "industry": "...", "business_
         except:
             business_profile = {"business_name": business_name, "industry": "Unknown", "business_model": "Unknown", "target_market": "Unknown"}
         
-        current_run["steps"]["1"]["output"] = f"✅ Industry: {business_profile.get('industry', 'N/A')}\n✅ Target Market: {business_profile.get('target_market', 'N/A')[:100]}..."
+        # Format complete output with all details
+        output_text = f"""🏢 Business: {business_profile.get('business_name', business_name)}
+
+📈 Industry: {business_profile.get('industry', 'N/A')}
+
+💼 Business Model: {business_profile.get('business_model', 'N/A')}
+
+🎯 Target Market: {business_profile.get('target_market', 'N/A')}
+
+👥 Customer Demographics: {business_profile.get('customer_demographics', 'N/A')}
+
+🛍️ Products/Services: {', '.join(business_profile.get('products_services', [])[:5]) if business_profile.get('products_services') else 'N/A'}
+
+⚔️ Competitors: {', '.join(business_profile.get('competitors', [])[:5]) if business_profile.get('competitors') else 'N/A'}
+
+📊 Market Position: {business_profile.get('market_position', 'N/A')}"""
+        
+        current_run["steps"]["1"]["output"] = output_text
         current_run["steps"]["1"]["status"] = "completed"
         
         # STEP 2: Keyword Generator
@@ -155,7 +172,9 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...]}}"""
         kw_data = json.loads(kw_response.content)
         keywords = kw_data.get("keywords", [])
         
-        current_run["steps"]["2"]["output"] = f"✅ Generated {len(keywords)} keywords\n📝 Examples: {', '.join(keywords[:5])}..."
+        # Show all keywords
+        keywords_display = "\n".join([f"  {i+1}. {kw}" for i, kw in enumerate(keywords)])
+        current_run["steps"]["2"]["output"] = f"✅ Generated {len(keywords)} keywords\n\n📝 Keywords:\n{keywords_display}"
         current_run["steps"]["2"]["status"] = "completed"
         
         # STEP 3: Trend Scraper (Reddit MCP)
@@ -186,7 +205,13 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...]}}"""
         
         reddit_posts.sort(key=lambda x: x.get('num_upvotes', 0) + 2*x.get('num_comments', 0), reverse=True)
         
-        current_run["steps"]["3"]["output"] = f"✅ Scraped {len(reddit_posts)} posts in 30s\n📊 Subreddits: {len(profile['target_subreddits'])}\n🔥 Top: {', '.join(profile['target_subreddits'][:5])}"
+        # Show all subreddits
+        subreddits_list = "\n".join([f"  {i+1}. r/{sub}" for i, sub in enumerate(profile['target_subreddits'][:20])])
+        current_run["steps"]["3"]["output"] = f"""✅ Scraped {len(reddit_posts)} posts in 30s
+📊 Subreddits: {len(profile['target_subreddits'])}
+
+🔥 Top Subreddits:
+{subreddits_list}"""
         current_run["steps"]["3"]["status"] = "completed"
         
         # STEP 4: Ranking Agent
@@ -211,10 +236,22 @@ Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts":
         except:
             ranked_data = {"total_posts_analyzed": len(reddit_posts), "pain_points": [], "overall_trends": []}
         
-        pain_count = len(ranked_data.get('pain_points', []))
-        trend_count = len(ranked_data.get('overall_trends', []))
+        pain_points_list = ranked_data.get('pain_points', [])
+        trends_list = ranked_data.get('overall_trends', [])
         
-        current_run["steps"]["4"]["output"] = f"✅ Analyzed {len(reddit_posts)} posts\n📌 Pain points: {pain_count}\n📈 Trends: {trend_count}"
+        # Format pain points
+        pain_text = "\n".join([f"  {i+1}. {p.get('pain', p) if isinstance(p, dict) else p}" for i, p in enumerate(pain_points_list)])
+        
+        # Format trends
+        trends_text = "\n".join([f"  {i+1}. {t.get('trend', t) if isinstance(t, dict) else t}" for i, t in enumerate(trends_list)])
+        
+        current_run["steps"]["4"]["output"] = f"""✅ Analyzed {len(reddit_posts)} posts
+
+📌 Pain Points ({len(pain_points_list)}):
+{pain_text if pain_text else '  None identified'}
+
+📈 Trends ({len(trends_list)}):
+{trends_text if trends_text else '  None identified'}"""
         current_run["steps"]["4"]["status"] = "completed"
         
         # STEP 5: Report Generator
@@ -230,7 +267,13 @@ Include: Executive Summary, Pain Points, Trends, Recommendations."""
         
         validation = {"groundedness_score": 0.85}
         
-        current_run["steps"]["5"]["output"] = f"✅ Report generated ({len(final_report)} chars)\n📊 Groundedness: {validation.get('groundedness_score', 0):.1f}"
+        # Show report preview
+        report_preview = final_report[:800] + ("..." if len(final_report) > 800 else "")
+        current_run["steps"]["5"]["output"] = f"""✅ Report generated ({len(final_report)} chars)
+📊 Groundedness: {validation.get('groundedness_score', 0):.1f}
+
+📄 Report Preview:
+{report_preview}"""
         current_run["steps"]["5"]["status"] = "completed"
         
         # STEP 6: Summarizer
@@ -258,7 +301,15 @@ Include: Executive Summary, Pain Points, Trends, Recommendations."""
         }
         avg_score = sum(eval_scores.values()) / len(eval_scores)
         
-        current_run["steps"]["7"]["output"] = f"✅ Evaluation complete\n📊 Average Score: {avg_score:.2f}\n🎯 User ID: {eval_scores['user_id']:.2f} | Community: {eval_scores['community']:.2f}\n🎯 Insights: {eval_scores['insights']:.2f} | Trends: {eval_scores['trends']:.2f}"
+        current_run["steps"]["7"]["output"] = f"""✅ Evaluation complete
+📊 Average Score: {avg_score:.2f}
+
+Detailed Scores:
+  1️⃣ User Identification: {eval_scores['user_id']:.2f}
+  2️⃣ Community Relevance: {eval_scores['community']:.2f}
+  3️⃣ Insight Extraction: {eval_scores['insights']:.2f}
+  4️⃣ Trend Relevance: {eval_scores['trends']:.2f}
+  5️⃣ Groundedness: {eval_scores['groundedness']:.2f}"""
         current_run["steps"]["7"]["status"] = "completed"
         
         current_run["status"] = "completed"
