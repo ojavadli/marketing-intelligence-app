@@ -232,7 +232,7 @@ Posts: {json.dumps(posts_for_analysis, indent=2)[:3000]}
 Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts": [...top 10...], "pain_points": [{{"pain": "specific pain", "supporting_posts": [1,2,3]}}], "overall_trends": [{{"trend": "specific trend", "supporting_posts": [1,2,3]}}]}}"""
         
         try:
-            ranked_data = json.loads(llm_json.invoke([HumanMessage(content=ranking_prompt)], timeout=15).content)
+            ranked_data = json.loads(llm_json.invoke([HumanMessage(content=ranking_prompt)], timeout=30).content)
         except:
             ranked_data = {"total_posts_analyzed": len(reddit_posts), "pain_points": [], "overall_trends": []}
         
