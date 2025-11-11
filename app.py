@@ -505,17 +505,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             padding: 15px;
             background: #f5f5f7;
             border-radius: 10px;
-            font-size: 14px;
-            line-height: 1.6;
+            font-size: 13px;
+            line-height: 1.7;
             color: #1d1d1f;
             white-space: pre-wrap;
             word-wrap: break-word;
             overflow-wrap: break-word;
             display: none;
-            max-height: none;
-            overflow-y: auto;
             margin-top: 15px;
             transition: all 0.3s ease;
+            height: auto !important;
+            max-height: 600px;
+            overflow-y: auto;
         }
         
         .step.expanded .step-output {
