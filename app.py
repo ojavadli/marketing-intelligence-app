@@ -644,7 +644,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         const stepEl = document.getElementById(`step${stepId}`);
                         const outputEl = document.getElementById(`output${stepId}`);
                         
-                        stepEl.className = `step ${step.status}`;
+                        // Preserve expanded state while updating status
+                        const wasExpanded = stepEl.classList.contains('expanded');
+                        stepEl.classList.remove('pending', 'running', 'completed');
+                        stepEl.classList.add(step.status);
+                        if (wasExpanded) {
+                            stepEl.classList.add('expanded');
+                        }
+                        
                         if (step.output) {
                             outputEl.textContent = step.output;
                         }
