@@ -440,13 +440,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             font-size: 14px;
             line-height: 1.6;
             color: #1d1d1f;
-            white-space: pre-line;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
             display: none;
+            max-height: none;
+            overflow-y: auto;
         }
         
         .step.completed .step-output,
         .step.running .step-output {
             display: block;
+        }
+        
+        .step {
+            min-height: auto;
         }
     </style>
 </head>
