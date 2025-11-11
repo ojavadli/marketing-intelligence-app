@@ -392,7 +392,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             gap: 15px;
-            margin-bottom: 15px;
+            margin-bottom: 0;
+            cursor: pointer;
+            padding-bottom: 15px;
+        }
+        
+        .step-header:hover {
+            opacity: 0.8;
+        }
+        
+        .expand-icon {
+            margin-left: auto;
+            font-size: 18px;
+            color: #86868b;
+            transition: transform 0.3s ease;
+        }
+        
+        .step.expanded .expand-icon {
+            transform: rotate(180deg);
         }
         
         .step-number {
@@ -446,10 +463,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             display: none;
             max-height: none;
             overflow-y: auto;
+            margin-top: 15px;
+            transition: all 0.3s ease;
         }
         
-        .step.completed .step-output,
-        .step.running .step-output {
+        .step.expanded .step-output {
             display: block;
         }
         
@@ -474,57 +492,64 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         <div class="pipeline">
             <div class="step" id="step1">
-                <div class="step-header">
+                <div class="step-header" onclick="toggleStep(1)">
                     <div class="step-number">1</div>
                     <div class="step-title">Profile Analyzer</div>
+                    <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output1"></div>
             </div>
             
             <div class="step" id="step2">
-                <div class="step-header">
+                <div class="step-header" onclick="toggleStep(2)">
                     <div class="step-number">2</div>
                     <div class="step-title">Keyword Generator</div>
+                    <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output2"></div>
             </div>
             
             <div class="step" id="step3">
-                <div class="step-header">
+                <div class="step-header" onclick="toggleStep(3)">
                     <div class="step-number">3</div>
                     <div class="step-title">Trend Scraper</div>
+                    <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output3"></div>
             </div>
             
             <div class="step" id="step4">
-                <div class="step-header">
+                <div class="step-header" onclick="toggleStep(4)">
                     <div class="step-number">4</div>
                     <div class="step-title">Ranking Agent</div>
+                    <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output4"></div>
             </div>
             
             <div class="step" id="step5">
-                <div class="step-header">
+                <div class="step-header" onclick="toggleStep(5)">
                     <div class="step-number">5</div>
                     <div class="step-title">Report Generator</div>
+                    <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output5"></div>
             </div>
             
             <div class="step" id="step6">
-                <div class="step-header">
+                <div class="step-header" onclick="toggleStep(6)">
                     <div class="step-number">6</div>
                     <div class="step-title">Summarizer</div>
+                    <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output6"></div>
             </div>
             
             <div class="step" id="step7">
-                <div class="step-header">
+                <div class="step-header" onclick="toggleStep(7)">
                     <div class="step-number">7</div>
                     <div class="step-title">Evaluator</div>
+                    <div class="expand-icon">▼</div>
                 </div>
                 <div class="step-output" id="output7"></div>
             </div>
@@ -533,6 +558,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     
     <script>
         let pollInterval;
+        
+        function toggleStep(stepId) {
+            const stepEl = document.getElementById(`step${stepId}`);
+            stepEl.classList.toggle('expanded');
+        }
         
         function runAnalysis() {
             const businessName = document.getElementById('businessName').value.trim();
