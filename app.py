@@ -9,6 +9,7 @@ import os
 import json
 import time
 import threading
+import concurrent.futures
 from datetime import datetime
 from io import BytesIO
 import pandas as pd
@@ -225,10 +226,12 @@ Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts":
         current_run["steps"]["4"]["output"] = f"✅ Analyzed {len(reddit_posts)} posts\n📌 Pain points: {pain_count}\n📈 Trends: {trend_count}"
         current_run["steps"]["4"]["status"] = "completed"
         
-        # STEP 5: Report Generator
+        # STEP 5: Report Generator (MAX 30 seconds)
         current_run["steps"]["5"]["status"] = "running"
         
-        # Check if we have data to generate report
+        final_report = ""
+        validation = {"groundedness_score": 0.0}
+        
         if len(reddit_posts) == 0:
             final_report = f"""# Marketing Intelligence Report: {business_name}
 
@@ -236,34 +239,35 @@ Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts":
 
 Unfortunately, no Reddit posts were found for {business_name} in the past week.
 
-**Business Profile:**
-- Industry: {business_profile.get('industry', 'N/A')}
-- Target Market: {business_profile.get('target_market', 'N/A')}
-
-**Possible Reasons:**
-- Low Reddit activity for this business
-- Keywords may need adjustment
-- Reddit API rate limiting
-- Business may not have strong Reddit presence
-
-**Recommendation:** Try analyzing a different business with more Reddit activity (e.g., Tesla, Duolingo, Netflix)."""
+**Recommendation:** Try Tesla, Duolingo, or Netflix."""
             validation = {"groundedness_score": 0.0}
-            current_run["steps"]["5"]["output"] = f"⚠️ No Reddit data - Basic report generated\n📄 {len(final_report)} chars"
+            current_run["steps"]["5"]["output"] = f"⚠️ No Reddit data\n📄 Basic report: {len(final_report)} chars"
         else:
-            report_prompt = f"""Generate marketing intelligence report for {business_name}.
-Profile: {json.dumps(business_profile, indent=2)[:500]}
-Insights: {json.dumps(ranked_data, indent=2)[:2000]}
-Include: Executive Summary, Pain Points, Trends, Recommendations."""
+            # Use concurrent.futures for hard timeout
+            def generate_report():
+                report_prompt = f"""Generate brief marketing intelligence report for {business_name}.
+Profile: {json.dumps(business_profile, indent=2)[:400]}
+Pain Points: {ranked_data.get('pain_points', [])[:5]}
+Trends: {ranked_data.get('overall_trends', [])[:5]}
+Posts: {len(reddit_posts)}
+
+Create concise report with: Executive Summary, Top Pain Points, Key Trends, Recommendations."""
+                
+                return llm.invoke([HumanMessage(content=report_prompt)]).content
             
             try:
-                report_response = llm.invoke([HumanMessage(content=report_prompt)], timeout=30)
-                final_report = report_response.content
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(generate_report)
+                    final_report = future.result(timeout=30)  # 30 second hard timeout
+                
                 validation = {"groundedness_score": 0.85}
-                current_run["steps"]["5"]["output"] = f"✅ Report generated ({len(final_report)} chars)\n📊 Groundedness: {validation.get('groundedness_score', 0):.1f}"
+                current_run["steps"]["5"]["output"] = f"✅ Report generated\n📄 {len(final_report)} chars"
+            except concurrent.futures.TimeoutError:
+                final_report = f"# {business_name} Marketing Intelligence\n\nReport generation timed out. Please try again."
+                current_run["steps"]["5"]["output"] = f"⚠️ Timeout after 30s\n📄 Fallback report"
             except Exception as e:
-                final_report = f"# Error generating report\n\nError: {str(e)}"
-                validation = {"groundedness_score": 0.0}
-                current_run["steps"]["5"]["output"] = f"⚠️ Report generation failed: {str(e)}"
+                final_report = f"# {business_name} Marketing Intelligence\n\nError: {str(e)}"
+                current_run["steps"]["5"]["output"] = f"⚠️ Error: {str(e)[:80]}"
         
         current_run["steps"]["5"]["status"] = "completed"
         
