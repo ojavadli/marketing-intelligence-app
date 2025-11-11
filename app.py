@@ -513,8 +513,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             margin-top: 15px;
             transition: all 0.3s ease;
             height: auto !important;
-            max-height: 1200px;
-            overflow-y: auto;
+            max-height: none;
+            overflow-y: visible;
         }
         
         .step.expanded .step-output {
