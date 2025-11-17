@@ -219,11 +219,13 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...]}}"""
 Business: {business_name}
 Industry: {business_profile.get('industry', 'N/A')}
 
-For EACH post, rate 0.0-1.0:
-- 1.0 = Directly about {business_name} or direct competitors
-- 0.8 = About industry ({business_profile.get('industry', 'this sector')})
-- 0.5 = Tangentially related (general business/tech)
-- 0.0 = Completely unrelated
+For EACH post, rate relevance 0.0-1.0 (use precise decimal values):
+- 0.9-1.0 = Directly about {business_name} or direct competitors
+- 0.7-0.9 = Industry relevant ({business_profile.get("industry", "this sector")})
+- 0.4-0.6 = Tangentially related
+- 0.0-0.3 = Completely unrelated
+
+Rate with continuous scores (e.g., 0.73, 0.85) for nuanced relevance.
 
 Posts: {json.dumps(batch_summary, indent=2)[:2000]}
 Return JSON: {{"relevance_scores": [0.0-1.0 list]}}"""
