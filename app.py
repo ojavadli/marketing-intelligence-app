@@ -200,7 +200,7 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...]}}"""
                     kw_idx = 0
                 try:
                     results = reddit.search_posts(query=keywords[kw_idx], t="week", limit=25)
-                    for post in results.posts:
+                    for post in results.items:
                         if post.id not in seen_ids and post.num_comments >= 5:
                             p = post.model_dump()
                             batch.append(p)
