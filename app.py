@@ -202,7 +202,19 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...]}}"""
                     results = reddit.search_posts(query=keywords[kw_idx], t="week", limit=25)
                     for post in results.items:
                         if post.id not in seen_ids and post.num_comments >= 5:
-                            p = post.model_dump()
+                            p = {
+                                "title": post.title,
+                                "subreddit": post.subreddit,
+                                "author": post.author,
+                                "score": post.score,
+                                "num_upvotes": post.score,
+                                "num_comments": post.num_comments,
+                                "created_utc": post.created_utc,
+                                "url": post.url,
+                                "selftext": post.selftext[:1000] if post.selftext else "",
+                                "permalink": post.permalink,
+                                "id": post.id
+                            }
                             batch.append(p)
                             all_scraped.append(p)
                             seen_ids.add(post.id)
