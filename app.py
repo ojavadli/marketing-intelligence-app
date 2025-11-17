@@ -180,6 +180,9 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...]}}"""
         # STEP 3: Enhanced Scraper - Iterative with Relevance Filtering
         current_run["steps"]["3"]["status"] = "running"
         
+        # Get keywords from Step 2 (stored in local variable)
+        # keywords variable already exists from Step 2
+        
         relevant_posts = []
         all_scraped = []
         seen_ids = set()
