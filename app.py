@@ -177,41 +177,76 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...]}}"""
         current_run["steps"]["2"]["output"] = f"✅ Generated {len(keywords)} keywords\n\n📝 Keywords:\n{keywords_display}"
         current_run["steps"]["2"]["status"] = "completed"
         
-        # STEP 3: Trend Scraper (Reddit MCP)
+        # STEP 3: Enhanced Scraper - Iterative with Relevance Filtering
         current_run["steps"]["3"]["status"] = "running"
         
-        profile = {"target_subreddits": []}
-        reddit_posts = []
-        TIME_LIMIT = 30
-        start_time = time.time()
-        keyword_idx = 0
+        relevant_posts = []
+        all_scraped = []
         seen_ids = set()
+        iteration = 0
+        max_iterations = 5
         
-        while time.time() - start_time < TIME_LIMIT:
-            if keyword_idx >= len(keywords):
-                keyword_idx = 0
-            kw = keywords[keyword_idx]
-            try:
-                results = reddit.search_posts(query=kw, t="week", limit=25)
-                for post in results.posts:
-                    if post.id not in seen_ids and post.num_comments >= 5:
-                        reddit_posts.append(post.model_dump())
-                        seen_ids.add(post.id)
-                        if post.subreddit not in profile["target_subreddits"]:
-                            profile["target_subreddits"].append(post.subreddit)
-            except:
-                pass
-            keyword_idx += 1
+        while len(relevant_posts) < 200 and iteration < max_iterations:
+            iteration += 1
+            current_run["steps"]["3"]["output"] = f"🔄 Iteration {iteration}: Scraping... ({len(relevant_posts)}/200 relevant)"
+            
+            # Scrape 30s batch
+            batch = []
+            start_time = time.time()
+            kw_idx = (iteration - 1) * 10
+            
+            while time.time() - start_time < 30:
+                if kw_idx >= len(keywords):
+                    kw_idx = 0
+                try:
+                    results = reddit.search_posts(query=keywords[kw_idx], t="week", limit=25)
+                    for post in results.posts:
+                        if post.id not in seen_ids and post.num_comments >= 5:
+                            p = post.model_dump()
+                            batch.append(p)
+                            all_scraped.append(p)
+                            seen_ids.add(post.id)
+                except:
+                    pass
+                kw_idx += 1
+            
+            # LLM relevance filter
+            if len(batch) > 0:
+                batch_summary = [{"id": p.get('id'), "title": p.get('title', '')[:200], "subreddit": p.get('subreddit', '')} for p in batch]
+                
+                filter_prompt = f"""Rate relevance of posts to {business_name} (0.0-1.0 each).
+Business: {business_name}
+Posts: {json.dumps(batch_summary, indent=2)[:2000]}
+Return JSON: {{"relevance_scores": [0.0-1.0 list]}}"""
+                
+                try:
+                    filter_resp = llm_json.invoke([HumanMessage(content=filter_prompt)])
+                    scores = json.loads(filter_resp.content).get('relevance_scores', [])
+                    
+                    passed = 0
+                    for post, score in zip(batch, scores):
+                        if score > 0.7:
+                            relevant_posts.append(post)
+                            passed += 1
+                    
+                    current_run["steps"]["3"]["output"] = f"""🔄 Iteration {iteration}:
+✅ Scraped: {len(batch)} posts
+✅ Passed filter: {passed} posts (>{len(batch)-passed} rejected)
+📊 Total relevant: {len(relevant_posts)}/200"""
+                except:
+                    relevant_posts.extend(batch)
         
-        reddit_posts.sort(key=lambda x: x.get('num_upvotes', 0) + 2*x.get('num_comments', 0), reverse=True)
+        reddit_posts = relevant_posts
+        profile = {"target_subreddits": list(set([p.get('subreddit', '') for p in reddit_posts]))}
         
-        # Show all subreddits
-        subreddits_list = "\n".join([f"  {i+1}. r/{sub}" for i, sub in enumerate(profile['target_subreddits'][:20])])
-        current_run["steps"]["3"]["output"] = f"""✅ Scraped {len(reddit_posts)} posts in 30s
+        subs_list = "\\n".join([f"  {i+1}. r/{s}" for i, s in enumerate(profile['target_subreddits'][:15])])
+        current_run["steps"]["3"]["output"] = f"""✅ Iterations: {iteration}
+✅ Total scraped: {len(all_scraped)} posts
+✅ Relevant (>0.7): {len(reddit_posts)} posts
 📊 Subreddits: {len(profile['target_subreddits'])}
 
 🔥 Top Subreddits:
-{subreddits_list}"""
+{subs_list}"""
         current_run["steps"]["3"]["status"] = "completed"
         
         # STEP 4: Ranking Agent
