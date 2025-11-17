@@ -26,8 +26,8 @@ CORS(app)
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY', '')
 
-llm_json = ChatOpenAI(model="gpt-4o", temperature=0, model_kwargs={"response_format": {"type": "json_object"}})
-llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+llm_json = ChatOpenAI(model="gpt-5.1", temperature=0, model_kwargs={"response_format": {"type": "json_object"}})
+llm = ChatOpenAI(model="gpt-5.1", temperature=0.7)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 # Reddit MCP (embedded)
@@ -232,7 +232,7 @@ Posts: {json.dumps(posts_for_analysis, indent=2)[:3000]}
 Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts": [...top 10...], "pain_points": [{{"pain": "specific pain", "supporting_posts": [1,2,3]}}], "overall_trends": [{{"trend": "specific trend", "supporting_posts": [1,2,3]}}]}}"""
         
         try:
-            ranked_data = json.loads(llm_json.invoke([HumanMessage(content=ranking_prompt)], timeout=30).content)
+            ranked_data = json.loads(llm_json.invoke([HumanMessage(content=ranking_prompt)], timeout=60).content)
         except:
             ranked_data = {"total_posts_analyzed": len(reddit_posts), "pain_points": [], "overall_trends": []}
         
