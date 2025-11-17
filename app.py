@@ -215,7 +215,16 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...]}}"""
                 batch_summary = [{"id": p.get('id'), "title": p.get('title', '')[:200], "subreddit": p.get('subreddit', '')} for p in batch]
                 
                 filter_prompt = f"""Rate relevance of posts to {business_name} (0.0-1.0 each).
+
 Business: {business_name}
+Industry: {business_profile.get('industry', 'N/A')}
+
+For EACH post, rate 0.0-1.0:
+- 1.0 = Directly about {business_name} or direct competitors
+- 0.8 = About industry ({business_profile.get('industry', 'this sector')})
+- 0.5 = Tangentially related (general business/tech)
+- 0.0 = Completely unrelated
+
 Posts: {json.dumps(batch_summary, indent=2)[:2000]}
 Return JSON: {{"relevance_scores": [0.0-1.0 list]}}"""
                 
