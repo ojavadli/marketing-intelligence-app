@@ -189,9 +189,9 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         iteration = 0
         max_iterations = 2
         
-        while len(relevant_posts) < 200 and iteration < max_iterations:
+        while len(relevant_posts) < 20 and iteration < max_iterations:
             iteration += 1
-            current_run["steps"]["3"]["output"] = f"🔄 Iteration {iteration}: Scraping... ({len(relevant_posts)}/200 relevant)"
+            current_run["steps"]["3"]["output"] = f"🔄 Iteration {iteration}: Scraping... ({len(relevant_posts)}/20 relevant)"
             
             # Scrape 30s batch
             batch = []
