@@ -187,7 +187,7 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         all_scraped = []
         seen_ids = set()
         iteration = 0
-        max_iterations = 5
+        max_iterations = 2
         
         while len(relevant_posts) < 200 and iteration < max_iterations:
             iteration += 1
