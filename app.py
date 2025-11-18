@@ -164,9 +164,9 @@ Return JSON: {{"business_name": "{business_name}", "industry": "...", "business_
         # STEP 2: Keyword Generator
         current_run["steps"]["2"]["status"] = "running"
         
-        keyword_prompt = f"""Generate 50 Reddit search keywords for {business_name}.
+        keyword_prompt = f"""Generate 200 Reddit search keywords for {business_name}.
 Business Profile: {json.dumps(business_profile, indent=2)[:500]}
-Return JSON: {{"keywords": ["keyword1", "keyword2", ...]}}"""
+Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         
         kw_response = llm_json.invoke([HumanMessage(content=keyword_prompt)])
         kw_data = json.loads(kw_response.content)
