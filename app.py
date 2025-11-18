@@ -387,9 +387,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #e8edf3 100%);
+            background: linear-gradient(-45deg, #f5f7fa, #e8edf3, #ffd7e2, #c8e8ff, #f5f7fa);
+            background-size: 400% 400%;
+            animation: gradientShift 15s ease infinite;
             min-height: 100vh;
             padding: 40px 20px;
             color: #1d1d1f;
@@ -399,23 +407,32 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         .header { text-align: center; margin-bottom: 50px; }
         
+        @keyframes titleGradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
         .header h1 {
             font-size: 40px;
             font-weight: 600;
             letter-spacing: -0.5px;
             margin-bottom: 10px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #4facfe, #667eea);
+            background-size: 400% 400%;
+            animation: titleGradient 8s ease infinite;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
         
         .input-section {
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(20px);
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(25px) saturate(180%);
             border-radius: 20px;
             padding: 35px;
             margin-bottom: 30px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+            box-shadow: 0 15px 50px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.8);
+            border: 1px solid rgba(255,255,255,0.5);
         }
         
         .input-group { margin-bottom: 25px; }
@@ -446,13 +463,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
         }
         
+        @keyframes buttonGlow {
+            0%, 100% { box-shadow: 0 0 20px rgba(102, 126, 234, 0.5), 0 0 40px rgba(244, 147, 251, 0.3); }
+            50% { box-shadow: 0 0 30px rgba(244, 147, 251, 0.6), 0 0 60px rgba(79, 172, 254, 0.4); }
+        }
+        
         .run-button {
             width: 100%;
             padding: 18px;
             font-size: 17px;
             font-weight: 600;
             color: white;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #4facfe);
+            background-size: 400% 400%;
+            animation: gradientShift 6s ease infinite, buttonGlow 3s ease-in-out infinite;
             border: none;
             border-radius: 12px;
             cursor: pointer;
@@ -480,23 +504,48 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
         
         .step {
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(20px);
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(20px) saturate(150%);
             border-radius: 16px;
             padding: 25px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
-            transition: all 0.3s ease;
-            border: 2px solid transparent;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        
+        @keyframes runningPulse {
+            0%, 100% { 
+                border-color: #667eea;
+                box-shadow: 0 4px 30px rgba(102, 126, 234, 0.3), inset 0 0 30px rgba(244, 147, 251, 0.1);
+            }
+            50% { 
+                border-color: #f093fb;
+                box-shadow: 0 6px 40px rgba(244, 147, 251, 0.4), inset 0 0 40px rgba(102, 126, 234, 0.15);
+            }
         }
         
         .step.running {
-            border-color: #667eea;
-            box-shadow: 0 4px 30px rgba(102, 126, 234, 0.2);
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px) saturate(200%);
+            animation: runningPulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes completedGlow {
+            0%, 100% { 
+                background: linear-gradient(-45deg, rgba(52, 199, 89, 0.15), rgba(79, 172, 254, 0.12), rgba(244, 147, 251, 0.10));
+                box-shadow: 0 4px 30px rgba(52, 199, 89, 0.15);
+            }
+            50% { 
+                background: linear-gradient(-45deg, rgba(79, 172, 254, 0.15), rgba(244, 147, 251, 0.12), rgba(52, 199, 89, 0.10));
+                box-shadow: 0 6px 40px rgba(79, 172, 254, 0.2);
+            }
         }
         
         .step.completed {
             border-color: #34c759;
-            background: linear-gradient(135deg, rgba(52, 199, 89, 0.05) 0%, rgba(52, 199, 89, 0.02) 100%);
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(15px) saturate(180%);
+            animation: completedGlow 4s ease-in-out infinite;
         }
         
         .step-header {
