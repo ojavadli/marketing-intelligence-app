@@ -326,11 +326,14 @@ Include: Executive Summary, Pain Points, Trends, Recommendations."""
         report_response = llm.invoke([HumanMessage(content=report_prompt)])
         final_report = report_response.content
         
-        # Show FULL report (not truncated)
+        # Clean up encoding issues and format for web display
+        clean_report = final_report.replace('■', '-').replace('‑', '-').replace('–', '-')
+        
+        # Show FULL report (not truncated, cleaned)
         current_run["steps"]["5"]["output"] = f"""✅ Report generated
 📄 Length: {len(final_report)} characters
 
-{final_report}"""
+{clean_report}"""
         current_run["steps"]["5"]["status"] = "completed"
         
         # STEP 6: Summarizer
