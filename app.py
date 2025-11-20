@@ -25,6 +25,7 @@ CORS(app)
 # Initialize LLM and tools
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY', '')
+SUNO_API_KEY = os.environ.get('SUNO_API_KEY', '')  # For future music generation feature
 
 llm_json = ChatOpenAI(model="gpt-5.1", temperature=0, model_kwargs={"response_format": {"type": "json_object"}})
 llm = ChatOpenAI(model="gpt-5.1", temperature=0.7)
