@@ -861,6 +861,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
                 <div class="step-output" id="output7"></div>
             </div>
+            
+            <div class="step" id="step9A">
+                <div class="step-header" onclick="toggleStep('9A')">
+                    <div class="step-number">9A</div>
+                    <div class="step-title">9A. Fun Report Generator (OpenAI API)</div>
+                    <div class="expand-icon">▼</div>
+                </div>
+                <div class="step-output" id="output9A"></div>
+            </div>
+            
+            <div class="step" id="step9B">
+                <div class="step-header" onclick="toggleStep('9B')">
+                    <div class="step-number">9B</div>
+                    <div class="step-title">9B. Audio Report Generator (Suno API)</div>
+                    <div class="expand-icon">▼</div>
+                </div>
+                <div class="step-output" id="output9B"></div>
+            </div>
         </div>
     </div>
     
@@ -911,7 +929,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         }
                         
                         if (step.output) {
-                            outputEl.textContent = step.output;
+                            // Use innerHTML for steps with download links (9B)
+                            if (stepId === '9B' && step.output.includes('<a href')) {
+                                outputEl.innerHTML = step.output;
+                            } else {
+                                outputEl.textContent = step.output;
+                            }
                         }
                     });
                     
