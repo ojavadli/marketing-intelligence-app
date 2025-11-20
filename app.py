@@ -97,7 +97,9 @@ current_run = {
         "4": {"name": "Ranking Agent", "status": "pending", "output": ""},
         "5": {"name": "Report Generator", "status": "pending", "output": ""},
         "6": {"name": "Summarizer", "status": "pending", "output": ""},
-        "7": {"name": "Evaluator", "status": "pending", "output": ""}
+        "7": {"name": "Evaluator", "status": "pending", "output": ""},
+        "9A": {"name": "Fun Report Generator", "status": "pending", "output": ""},
+        "9B": {"name": "Audio Report Generator", "status": "pending", "output": ""}
     }
 }
 
@@ -372,6 +374,150 @@ Detailed Scores:
   4️⃣ Trend Relevance: {eval_scores['trends']:.2f}
   5️⃣ Groundedness: {eval_scores['groundedness']:.2f}"""
         current_run["steps"]["7"]["status"] = "completed"
+        
+        # STEP 9A: Fun Report Generator (Lyrics)
+        current_run["steps"]["9A"]["status"] = "running"
+        
+        # Extract report sections for lyrics
+        exec_summary = final_report[:500] if len(final_report) > 500 else final_report
+        pain_points_text = "\n".join([f"- {p.get('pain', p) if isinstance(p, dict) else p}" for p in ranked_data.get('pain_points', [])[:5]])
+        trends_text = "\n".join([f"- {t.get('trend', t) if isinstance(t, dict) else t}" for t in ranked_data.get('overall_trends', [])[:5]])
+        
+        lyrics_prompt = f"""Transform this marketing intelligence report into energetic song lyrics.
+
+Business: {business_name}
+Industry: {business_profile.get('industry', 'N/A')}
+
+Key Findings:
+Executive Summary: {exec_summary}
+Pain Points: {pain_points_text}
+Trends: {trends_text}
+Posts Analyzed: {len(reddit_posts)}
+
+Create song lyrics that:
+- Start with the Business Name in the first line
+- Have a section explicitly titled "Executive Summary" followed by summary lyrics
+- Have a section explicitly titled "Pain Points" followed by pain point lyrics
+- Have a section explicitly titled "Trends" followed by trend lyrics
+- Have a section explicitly titled "Recommendations" followed by recommendation lyrics
+- Style: Energetic R&B/reggae, rhythmic, melodic, touch of humor
+- Structure: Verses (findings), Chorus (main themes), Bridge (recommendations)
+- Length: 500-800 words total
+- NO URLs or citations (just the insights)
+- Make it fun and memorable!
+
+Format with [Intro], [Verse 1], [Chorus], [Verse 2], [Bridge], etc."""
+        
+        try:
+            lyrics_response = llm.invoke([HumanMessage(content=lyrics_prompt)])
+            song_lyrics = lyrics_response.content
+            
+            current_run["steps"]["9A"]["output"] = f"""✅ Song lyrics generated ({len(song_lyrics)} characters)
+
+🎵 PREVIEW:
+{song_lyrics[:500]}...
+
+Full lyrics ready for audio generation in Step 9B"""
+            current_run["steps"]["9A"]["status"] = "completed"
+        except Exception as e:
+            song_lyrics = f"[Verse 1]\n{business_name} report is here\nWith insights crystal clear\n[Chorus]\nMarketing intelligence for the win!"
+            current_run["steps"]["9A"]["output"] = f"⚠️ Lyrics generation failed: {str(e)}\nUsing fallback lyrics."
+            current_run["steps"]["9A"]["status"] = "completed"
+        
+        # STEP 9B: Audio Report Generator (Suno API)
+        current_run["steps"]["9B"]["status"] = "running"
+        
+        if SUNO_API_KEY:
+            try:
+                import requests
+                
+                SUNO_API_URL = "https://api.aimlapi.com/suno/v1/task/create"
+                
+                headers = {
+                    "Authorization": f"Bearer {SUNO_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                
+                # Submit generation request
+                payload = {
+                    "prompt": song_lyrics[:5000],  # V5 max is 5000 chars
+                    "style": "reggae, r&b, laid-back, humor, energetic, melodic vocal",
+                    "title": f"Marketing Intel: {business_name}",
+                    "customMode": True,
+                    "instrumental": False,
+                    "model": "V5",
+                    "callBackUrl": "https://example.com/callback"
+                }
+                
+                current_run["steps"]["9B"]["output"] = "🎤 Submitting to Suno V5..."
+                
+                response = requests.post(SUNO_API_URL, headers=headers, json=payload, timeout=30)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    task_id = result.get('data', {}).get('task_id', '')
+                    
+                    if task_id:
+                        # Poll for completion (max 5 min = 10 iterations x 30s)
+                        CHECK_URL = f"https://api.aimlapi.com/suno/v1/task/result/{task_id}"
+                        
+                        for attempt in range(10):
+                            current_run["steps"]["9B"]["output"] = f"🎵 Generating audio... (attempt {attempt + 1}/10)"
+                            time.sleep(30)
+                            
+                            check_response = requests.get(CHECK_URL, headers=headers, timeout=15)
+                            
+                            if check_response.status_code == 200:
+                                check_result = check_response.json()
+                                status = check_result.get('data', {}).get('status', '')
+                                
+                                if status == 'SUCCESS':
+                                    audio_data = check_result['data']['response']['data']
+                                    
+                                    # Get audio URLs
+                                    audio_urls = []
+                                    for i, audio in enumerate(audio_data):
+                                        audio_url = audio.get('audio_url', '')
+                                        if audio_url:
+                                            audio_urls.append(audio_url)
+                                    
+                                    if audio_urls:
+                                        # Display download links
+                                        links_html = "\n".join([f'<a href="{url}" download>📥 Download Song {i+1}</a>' for i, url in enumerate(audio_urls)])
+                                        
+                                        current_run["steps"]["9B"]["output"] = f"""✅ Audio generated successfully!
+
+🎵 {len(audio_urls)} track(s) created
+
+{links_html}
+
+Click links to download MP3 files"""
+                                        current_run["steps"]["9B"]["status"] = "completed"
+                                        break
+                                    else:
+                                        current_run["steps"]["9B"]["output"] = "❌ No audio URLs found in response"
+                                        current_run["steps"]["9B"]["status"] = "completed"
+                                        break
+                                elif status == 'FAILED':
+                                    current_run["steps"]["9B"]["output"] = f"❌ Suno generation failed: {check_result}"
+                                    current_run["steps"]["9B"]["status"] = "completed"
+                                    break
+                        else:
+                            # Timeout after 10 attempts
+                            current_run["steps"]["9B"]["output"] = "⏱️ Audio generation timed out (5 min)"
+                            current_run["steps"]["9B"]["status"] = "completed"
+                    else:
+                        current_run["steps"]["9B"]["output"] = f"❌ No task_id returned: {result}"
+                        current_run["steps"]["9B"]["status"] = "completed"
+                else:
+                    current_run["steps"]["9B"]["output"] = f"❌ Suno API error: {response.status_code} - {response.text}"
+                    current_run["steps"]["9B"]["status"] = "completed"
+            except Exception as e:
+                current_run["steps"]["9B"]["output"] = f"❌ Audio generation failed: {str(e)}"
+                current_run["steps"]["9B"]["status"] = "completed"
+        else:
+            current_run["steps"]["9B"]["output"] = "⚠️ SUNO_API_KEY not configured. Set environment variable to enable audio generation."
+            current_run["steps"]["9B"]["status"] = "completed"
         
         current_run["status"] = "completed"
         
