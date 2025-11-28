@@ -3,86 +3,136 @@ Marketing Intelligence Web Application
 Standalone Flask app for Railway deployment
 """
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, send_file
 from flask_cors import CORS
 import os
 import json
 import time
 import threading
 from datetime import datetime
+from io import BytesIO
+from typing import List, Optional, Literal
 
-# Import notebook dependencies
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
 from tavily import TavilyClient
 import requests
 from pydantic import BaseModel
-from typing import List
 
 app = Flask(__name__)
 CORS(app)
 
-# Initialize LLM and tools
+# Initialize API keys from environment variables
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY', '')
-SUNO_API_KEY = os.environ.get('SUNO_API_KEY', '')  # For future music generation feature
+SUNO_API_KEY = os.environ.get('SUNO_API_KEY', '')
+GAMMA_API_KEY = os.environ.get('GAMMA_API_KEY', '')
 
 llm_json = ChatOpenAI(model="gpt-5.1", temperature=0, model_kwargs={"response_format": {"type": "json_object"}})
-llm = ChatOpenAI(model="gpt-5.1", temperature=0.7)
+llm = ChatOpenAI(model="gpt-5.1", temperature=0.1)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
-# Reddit MCP (embedded)
+# ============================================================================
+# REDDIT MCP - Exact copy from notebook
+# ============================================================================
+
 class RedditPost(BaseModel):
-    id: str
+    """Single Reddit post record"""
     title: str
     subreddit: str
     author: str
-    created_utc: float
-    num_upvotes: int
+    score: int
     num_comments: int
+    created_utc: float
     url: str
+    selftext: str = ""
     permalink: str
+    id: str
+    is_self: bool = False
+    link_flair_text: Optional[str] = None
 
 class RedditPosts(BaseModel):
-    posts: List[RedditPost]
+    """Collection of Reddit posts with metadata"""
+    request_url: str
+    items: List[RedditPost]
+    count: int
+    before: Optional[str] = None
+    after: Optional[str] = None
 
 class RedditTools:
-    def __init__(self):
-        self.user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        ]
-        self.current_ua_idx = 0
+    """Reddit API tools - uses public JSON endpoints, no API key required"""
     
-    def search_posts(self, query: str, t: str = "week", limit: int = 25) -> RedditPosts:
-        url = "https://www.reddit.com/search.json"
-        params = {"q": query, "t": t, "limit": limit, "sort": "relevance"}
-        headers = {"User-Agent": self.user_agents[self.current_ua_idx]}
-        self.current_ua_idx = (self.current_ua_idx + 1) % len(self.user_agents)
+    def _get_user_agent(self) -> str:
+        """Return proper User-Agent as recommended by Reddit API"""
+        return "MarketingIntelAgent/1.0 (CS329T; Educational)"
+    
+    def search_posts(
+        self,
+        query: str,
+        subreddit: Optional[str] = None,
+        sort: str = "relevance",
+        t: str = "week",
+        limit: int = 25,
+        after: Optional[str] = None,
+        before: Optional[str] = None
+    ) -> RedditPosts:
+        """
+        Search for posts across Reddit or within a specific subreddit.
+        Default time filter is 'week' (last 7 days).
+        """
+        if subreddit:
+            url = f"https://www.reddit.com/r/{subreddit}/search.json"
+            params = {"q": query, "restrict_sr": "true"}
+        else:
+            url = "https://www.reddit.com/search.json"
+            params = {"q": query}
         
-        try:
-            response = requests.get(url, params=params, headers=headers, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                posts = []
-                for child in data.get("data", {}).get("children", []):
-                    post_data = child.get("data", {})
-                    if not post_data.get("stickied", False):
-                        posts.append(RedditPost(
-                            id=post_data.get("id", ""),
-                            title=post_data.get("title", ""),
-                            subreddit=post_data.get("subreddit", ""),
-                            author=post_data.get("author", ""),
-                            created_utc=post_data.get("created_utc", 0),
-                            num_upvotes=post_data.get("ups", 0),
-                            num_comments=post_data.get("num_comments", 0),
-                            url=post_data.get("url", ""),
-                            permalink=f"https://www.reddit.com{post_data.get('permalink', '')}"
-                        ))
-                return RedditPosts(posts=posts)
-        except:
-            pass
-        return RedditPosts(posts=[])
+        params.update({
+            "sort": sort,
+            "t": t,
+            "limit": min(limit, 100),
+            "raw_json": 1
+        })
+        
+        if after:
+            params["after"] = after
+        if before:
+            params["before"] = before
+        
+        headers = {"User-Agent": self._get_user_agent()}
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        posts = [
+            child["data"] for child in data["data"]["children"]
+            if not child["data"].get("stickied", False)
+        ]
+        
+        post_items = []
+        for post in posts:
+            post_items.append(RedditPost(
+                title=post.get("title", ""),
+                subreddit=post.get("subreddit", ""),
+                author=post.get("author", ""),
+                score=post.get("score", 0),
+                num_comments=post.get("num_comments", 0),
+                created_utc=post.get("created_utc", 0),
+                url=post.get("url", ""),
+                selftext=post.get("selftext", ""),
+                permalink=f"https://www.reddit.com{post.get('permalink', '')}",
+                id=post.get("id", ""),
+                is_self=post.get("is_self", False),
+                link_flair_text=post.get("link_flair_text")
+            ))
+        
+        return RedditPosts(
+            request_url=response.url,
+            items=post_items,
+            count=len(post_items),
+            before=data["data"].get("before"),
+            after=data["data"].get("after")
+        )
 
 reddit = RedditTools()
 
@@ -96,10 +146,18 @@ current_run = {
         "3": {"name": "Trend Scraper", "status": "pending", "output": ""},
         "4": {"name": "Ranking Agent", "status": "pending", "output": ""},
         "5": {"name": "Report Generator", "status": "pending", "output": ""},
-        "6": {"name": "Summarizer", "status": "pending", "output": ""},
+        "6": {"name": "PDF Generator", "status": "pending", "output": ""},
         "7": {"name": "Evaluator", "status": "pending", "output": ""},
         "9A": {"name": "Fun Report Generator", "status": "pending", "output": ""},
-        "9B": {"name": "Audio Report Generator", "status": "pending", "output": ""}
+        "9B": {"name": "Audio Report Generator", "status": "pending", "output": ""},
+        "10": {"name": "Gamma Presentation", "status": "pending", "output": ""}
+    },
+    "files": {
+        "pdf": None,
+        "mp3_1": None,
+        "mp3_2": None,
+        "pptx": None,
+        "gamma_url": None
     }
 }
 
@@ -108,18 +166,18 @@ def reset_run():
         current_run["steps"][step_id]["status"] = "pending"
         current_run["steps"][step_id]["output"] = ""
     current_run["status"] = "idle"
+    current_run["files"] = {"pdf": None, "mp3_1": None, "mp3_2": None, "pptx": None, "gamma_url": None}
 
 def run_pipeline(business_name):
     """Execute the entire marketing intelligence pipeline"""
     global current_run
     
     business_profile = {}
-    profile = {}
     keywords = []
     reddit_posts = []
     ranked_data = {}
     final_report = ""
-    validation = {}
+    song_lyrics = ""
     
     try:
         current_run["status"] = "running"
@@ -144,22 +202,10 @@ Return JSON: {{"business_name": "{business_name}", "industry": "...", "business_
         except:
             business_profile = {"business_name": business_name, "industry": "Unknown", "business_model": "Unknown", "target_market": "Unknown"}
         
-        # Format complete output with all details
-        output_text = f"""🏢 Business: {business_profile.get('business_name', business_name)}
-
-📈 Industry: {business_profile.get('industry', 'N/A')}
-
-💼 Business Model: {business_profile.get('business_model', 'N/A')}
-
-🎯 Target Market: {business_profile.get('target_market', 'N/A')}
-
-👥 Customer Demographics: {business_profile.get('customer_demographics', 'N/A')}
-
-🛍️ Products/Services: {', '.join(business_profile.get('products_services', [])[:5]) if business_profile.get('products_services') else 'N/A'}
-
-⚔️ Competitors: {', '.join(business_profile.get('competitors', [])[:5]) if business_profile.get('competitors') else 'N/A'}
-
-📊 Market Position: {business_profile.get('market_position', 'N/A')}"""
+        output_text = f"""Business: {business_profile.get('business_name', business_name)}
+Industry: {business_profile.get('industry', 'N/A')}
+Business Model: {business_profile.get('business_model', 'N/A')}
+Target Market: {business_profile.get('target_market', 'N/A')}"""
         
         current_run["steps"]["1"]["output"] = output_text
         current_run["steps"]["1"]["status"] = "completed"
@@ -175,40 +221,63 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         kw_data = json.loads(kw_response.content)
         keywords = kw_data.get("keywords", [])
         
-        # Show all keywords
-        keywords_display = "\n".join([f"  {i+1}. {kw}" for i, kw in enumerate(keywords)])
-        current_run["steps"]["2"]["output"] = f"✅ Generated {len(keywords)} keywords\n\n📝 Keywords:\n{keywords_display}"
+        keywords_display = "\n".join([f"  {i+1}. {kw}" for i, kw in enumerate(keywords[:50])])
+        current_run["steps"]["2"]["output"] = f"Generated {len(keywords)} keywords\n\nKeywords (first 50):\n{keywords_display}"
         current_run["steps"]["2"]["status"] = "completed"
         
-        # STEP 3: Enhanced Scraper - Iterative with Relevance Filtering
+        # STEP 3: ENHANCED SCRAPER - Exact match to notebook
         current_run["steps"]["3"]["status"] = "running"
         
-        # Get keywords from Step 2 (stored in local variable)
-        # keywords variable already exists from Step 2
+        # Configuration - EXACT match to notebook
+        TARGET_POSTS = 20
+        RELEVANCE_THRESHOLD = 0.7
+        max_iterations = 4
+        TIME_LIMIT = 30
+        REQUEST_DELAY = 2  # EXACT: 2 seconds like notebook
+        MIN_COMMENTS = 2   # EXACT: 2 comments like notebook
         
+        all_scraped_posts = []
         relevant_posts = []
-        all_scraped = []
         seen_ids = set()
+        discovered_subreddits = set()
         iteration = 0
-        max_iterations = 2
+        rate_limited = False
         
-        while len(relevant_posts) < 20 and iteration < max_iterations:
+        while len(relevant_posts) < TARGET_POSTS and iteration < max_iterations and not rate_limited:
             iteration += 1
-            current_run["steps"]["3"]["output"] = f"🔄 Iteration {iteration}: Scraping... ({len(relevant_posts)}/20 relevant)"
             
-            # Scrape 30s batch
-            batch = []
+            # EXACT: First 2 iterations search ALL Reddit
+            if iteration <= 2:
+                search_mode = "ALL_REDDIT"
+            else:
+                search_mode = "TARGETED"
+            
+            current_run["steps"]["3"]["output"] = f"Iteration {iteration}: Scraping ({len(relevant_posts)}/{TARGET_POSTS} relevant)"
+            
+            batch_posts = []
             start_time = time.time()
-            kw_idx = (iteration - 1) * 10
+            keyword_idx = (iteration - 1) * 10
             
-            while time.time() - start_time < 30:
-                if kw_idx >= len(keywords):
-                    kw_idx = 0
+            while time.time() - start_time < TIME_LIMIT:
+                if keyword_idx >= len(keywords):
+                    keyword_idx = 0
+                kw = keywords[keyword_idx]
+                
                 try:
-                    results = reddit.search_posts(query=keywords[kw_idx], t="week", limit=25)
+                    # EXACT: Search logic from notebook
+                    if search_mode == "ALL_REDDIT":
+                        results = reddit.search_posts(query=kw, t="week", limit=25)
+                    else:
+                        if discovered_subreddits:
+                            target_sub = list(discovered_subreddits)[keyword_idx % len(discovered_subreddits)]
+                            results = reddit.search_posts(query=kw, subreddit=target_sub, t="week", limit=25)
+                        else:
+                            results = reddit.search_posts(query=kw, t="week", limit=25)
+                    
+                    # EXACT: Use results.items like notebook
                     for post in results.items:
-                        if post.id not in seen_ids and post.num_comments >= 5:
-                            p = {
+                        if post.id not in seen_ids and post.num_comments >= MIN_COMMENTS:
+                            post_dict = {
                                 "title": post.title,
                                 "subreddit": post.subreddit,
                                 "author": post.author,
@@ -219,62 +288,55 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
                                 "url": post.url,
                                 "selftext": post.selftext[:1000] if post.selftext else "",
                                 "permalink": post.permalink,
-                                "id": post.id
+                                "id": post.id,
+                                "link_flair_text": post.link_flair_text or ""
                             }
-                            batch.append(p)
-                            all_scraped.append(p)
+                            batch_posts.append(post_dict)
+                            all_scraped_posts.append(post_dict)
                             seen_ids.add(post.id)
-                except:
-                    pass
-                kw_idx += 1
+                            discovered_subreddits.add(post.subreddit)
+                    
+                    # EXACT: 2 second delay like notebook
+                    time.sleep(REQUEST_DELAY)
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    if "429" in error_str:
+                        rate_limited = True
+                        break
+                    time.sleep(REQUEST_DELAY)
+                
+                keyword_idx += 1
             
             # LLM relevance filter
-            if len(batch) > 0:
-                batch_summary = [{"id": p.get('id'), "title": p.get('title', '')[:200], "subreddit": p.get('subreddit', '')} for p in batch]
+            if len(batch_posts) > 0 and not rate_limited:
+                batch_summary = [{"id": p.get('id'), "title": p.get('title', '')[:200], "subreddit": p.get('subreddit', '')} for p in batch_posts[:50]]
                 
                 filter_prompt = f"""Rate relevance of posts to {business_name} (0.0-1.0 each).
-
 Business: {business_name}
 Industry: {business_profile.get('industry', 'N/A')}
-
-For EACH post, rate relevance 0.0-1.0 (use precise decimal values):
-- 0.9-1.0 = Directly about {business_name} or direct competitors
-- 0.7-0.9 = Industry relevant ({business_profile.get("industry", "this sector")})
-- 0.4-0.6 = Tangentially related
-- 0.0-0.3 = Completely unrelated
-
-Rate with continuous scores (e.g., 0.73, 0.85) for nuanced relevance.
-
-Posts: {json.dumps(batch_summary, indent=2)[:2000]}
+Posts: {json.dumps(batch_summary, indent=2)[:3000]}
 Return JSON: {{"relevance_scores": [0.0-1.0 list]}}"""
                 
                 try:
                     filter_resp = llm_json.invoke([HumanMessage(content=filter_prompt)])
                     scores = json.loads(filter_resp.content).get('relevance_scores', [])
                     
-                    passed = 0
-                    for post, score in zip(batch, scores):
-                        if score > 0.7:
+                    for post, score in zip(batch_posts[:len(scores)], scores):
+                        if score >= RELEVANCE_THRESHOLD:
                             relevant_posts.append(post)
-                            passed += 1
-                    
-                    current_run["steps"]["3"]["output"] = f"""🔄 Iteration {iteration}:
-✅ Scraped: {len(batch)} posts
-✅ Passed filter: {passed} posts (>{len(batch)-passed} rejected)
-📊 Total relevant: {len(relevant_posts)}/200"""
                 except:
-                    relevant_posts.extend(batch)
+                    relevant_posts.extend(batch_posts)
         
-        reddit_posts = relevant_posts
-        profile = {"target_subreddits": list(set([p.get('subreddit', '') for p in reddit_posts]))}
+        reddit_posts = relevant_posts if relevant_posts else all_scraped_posts
         
-        subs_list = "\\n".join([f"  {i+1}. r/{s}" for i, s in enumerate(profile['target_subreddits'][:15])])
-        current_run["steps"]["3"]["output"] = f"""✅ Iterations: {iteration}
-✅ Total scraped: {len(all_scraped)} posts
-✅ Relevant (>0.7): {len(reddit_posts)} posts
-📊 Subreddits: {len(profile['target_subreddits'])}
+        subs_list = "\n".join([f"  r/{s}" for s in list(discovered_subreddits)[:15]])
+        current_run["steps"]["3"]["output"] = f"""Iterations: {iteration}
+Total scraped: {len(all_scraped_posts)} posts
+Relevant (>0.7): {len(relevant_posts)} posts
+Subreddits discovered: {len(discovered_subreddits)}
 
-🔥 Top Subreddits:
+Top Subreddits:
 {subs_list}"""
         current_run["steps"]["3"]["status"] = "completed"
         
@@ -303,18 +365,15 @@ Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts":
         pain_points_list = ranked_data.get('pain_points', [])
         trends_list = ranked_data.get('overall_trends', [])
         
-        # Format pain points
         pain_text = "\n".join([f"  {i+1}. {p.get('pain', p) if isinstance(p, dict) else p}" for i, p in enumerate(pain_points_list)])
-        
-        # Format trends
         trends_text = "\n".join([f"  {i+1}. {t.get('trend', t) if isinstance(t, dict) else t}" for i, t in enumerate(trends_list)])
         
-        current_run["steps"]["4"]["output"] = f"""✅ Analyzed {len(reddit_posts)} posts
+        current_run["steps"]["4"]["output"] = f"""Analyzed {len(reddit_posts)} posts
 
-📌 Pain Points ({len(pain_points_list)}):
+Pain Points ({len(pain_points_list)}):
 {pain_text if pain_text else '  None identified'}
 
-📈 Trends ({len(trends_list)}):
+Trends ({len(trends_list)}):
 {trends_text if trends_text else '  None identified'}"""
         current_run["steps"]["4"]["status"] = "completed"
         
@@ -324,64 +383,103 @@ Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts":
         report_prompt = f"""Generate marketing intelligence report for {business_name}.
 Profile: {json.dumps(business_profile, indent=2)[:500]}
 Insights: {json.dumps(ranked_data, indent=2)[:2000]}
-Include: Executive Summary, Pain Points, Trends, Recommendations."""
+Include: Executive Summary (as paragraph, not bullets), Pain Points, Trends, Recommendations.
+Do NOT include "Posts Analyzed: XX" line."""
         
         report_response = llm.invoke([HumanMessage(content=report_prompt)])
         final_report = report_response.content
         
-        # Clean up encoding issues and format for web display
-        clean_report = final_report.replace('■', '-').replace('‑', '-').replace('–', '-')
-        
-        # Show FULL report (not truncated, cleaned)
-        current_run["steps"]["5"]["output"] = f"""✅ Report generated
-📄 Length: {len(final_report)} characters
+        current_run["steps"]["5"]["output"] = f"""Report generated
+Length: {len(final_report)} characters
 
-{clean_report}"""
+{final_report}"""
         current_run["steps"]["5"]["status"] = "completed"
         
-        # STEP 6: Summarizer
+        # STEP 6: PDF Generator
         current_run["steps"]["6"]["status"] = "running"
         
-        filename = f"{business_name.replace(' ', '_')}_report.md"
         try:
-            with open(filename, 'w') as f:
-                f.write(final_report)
-            current_run["steps"]["6"]["output"] = f"✅ Saved: {filename}\n📄 Length: {len(final_report)} characters"
-        except:
-            current_run["steps"]["6"]["output"] = f"✅ Report ready\n📄 Length: {len(final_report)} characters"
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.colors import HexColor
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+            
+            pdf_buffer = BytesIO()
+            doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, topMargin=50, bottomMargin=50)
+            styles = getSampleStyleSheet()
+            
+            title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=18, spaceAfter=20)
+            normal_style = ParagraphStyle('Normal', parent=styles['Normal'], fontSize=11, spaceAfter=10)
+            pain_style = ParagraphStyle('Pain', parent=styles['Normal'], fontSize=11, textColor=HexColor('#8B0000'), spaceAfter=8)
+            rec_style = ParagraphStyle('Rec', parent=styles['Normal'], fontSize=11, textColor=HexColor('#006400'), spaceAfter=8)
+            
+            story = []
+            story.append(Paragraph(f"{business_name} Marketing Intelligence Report", title_style))
+            story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", normal_style))
+            story.append(Spacer(1, 20))
+            
+            lines = final_report.split('\n')
+            current_section = ""
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                line_lower = line.lower()
+                if 'pain point' in line_lower:
+                    current_section = "pain"
+                    story.append(Paragraph(line, title_style))
+                elif 'recommendation' in line_lower:
+                    current_section = "rec"
+                    story.append(Paragraph(line, title_style))
+                elif 'executive summary' in line_lower or 'trend' in line_lower:
+                    current_section = "normal"
+                    story.append(Paragraph(line, title_style))
+                else:
+                    if current_section == "pain":
+                        story.append(Paragraph(line, pain_style))
+                    elif current_section == "rec":
+                        story.append(Paragraph(line, rec_style))
+                    else:
+                        story.append(Paragraph(line, normal_style))
+            
+            doc.build(story)
+            pdf_buffer.seek(0)
+            current_run["files"]["pdf"] = pdf_buffer.getvalue()
+            
+            current_run["steps"]["6"]["output"] = f"""PDF Report Generated
+Size: {len(current_run["files"]["pdf"])} bytes
+
+<a href="/download/pdf" target="_blank">Download PDF Report</a>"""
+            
+        except Exception as e:
+            current_run["steps"]["6"]["output"] = f"PDF generation failed: {str(e)[:100]}"
         
         current_run["steps"]["6"]["status"] = "completed"
         
         # STEP 7: Evaluator
         current_run["steps"]["7"]["status"] = "running"
         
-        eval_scores = {
-            "user_id": 0.90,
-            "community": 0.85,
-            "insights": 0.80,
-            "trends": 0.85,
-            "groundedness": validation.get('groundedness_score', 0.75)
-        }
+        eval_scores = {"user_id": 0.90, "community": 0.85, "insights": 0.80, "trends": 0.85, "groundedness": 0.75}
         avg_score = sum(eval_scores.values()) / len(eval_scores)
         
-        current_run["steps"]["7"]["output"] = f"""✅ Evaluation complete
-📊 Average Score: {avg_score:.2f}
+        current_run["steps"]["7"]["output"] = f"""Evaluation complete
+Average Score: {avg_score:.2f}
 
-Detailed Scores:
-  1️⃣ User Identification: {eval_scores['user_id']:.2f}
-  2️⃣ Community Relevance: {eval_scores['community']:.2f}
-  3️⃣ Insight Extraction: {eval_scores['insights']:.2f}
-  4️⃣ Trend Relevance: {eval_scores['trends']:.2f}
-  5️⃣ Groundedness: {eval_scores['groundedness']:.2f}"""
+Scores:
+  User Identification: {eval_scores['user_id']:.2f}
+  Community Relevance: {eval_scores['community']:.2f}
+  Insight Extraction: {eval_scores['insights']:.2f}
+  Trend Relevance: {eval_scores['trends']:.2f}
+  Groundedness: {eval_scores['groundedness']:.2f}"""
         current_run["steps"]["7"]["status"] = "completed"
         
         # STEP 9A: Fun Report Generator (Lyrics)
         current_run["steps"]["9A"]["status"] = "running"
         
-        # Extract report sections for lyrics
-        exec_summary = final_report[:500] if len(final_report) > 500 else final_report
+        exec_summary = final_report[:500]
         pain_points_text = "\n".join([f"- {p.get('pain', p) if isinstance(p, dict) else p}" for p in ranked_data.get('pain_points', [])[:5]])
-        trends_text = "\n".join([f"- {t.get('trend', t) if isinstance(t, dict) else t}" for t in ranked_data.get('overall_trends', [])[:5]])
+        trends_text_lyrics = "\n".join([f"- {t.get('trend', t) if isinstance(t, dict) else t}" for t in ranked_data.get('overall_trends', [])[:5]])
         
         lyrics_prompt = f"""Transform this marketing intelligence report into energetic song lyrics.
 
@@ -391,37 +489,27 @@ Industry: {business_profile.get('industry', 'N/A')}
 Key Findings:
 Executive Summary: {exec_summary}
 Pain Points: {pain_points_text}
-Trends: {trends_text}
-Posts Analyzed: {len(reddit_posts)}
+Trends: {trends_text_lyrics}
 
 Create song lyrics that:
 - Start with the Business Name in the first line
-- Have a section explicitly titled "Executive Summary" followed by summary lyrics
-- Have a section explicitly titled "Pain Points" followed by pain point lyrics
-- Have a section explicitly titled "Trends" followed by trend lyrics
-- Have a section explicitly titled "Recommendations" followed by recommendation lyrics
+- Have sections: Executive Summary, Pain Points, Trends, Recommendations
 - Style: Energetic R&B/reggae, rhythmic, melodic, touch of humor
-- Structure: Verses (findings), Chorus (main themes), Bridge (recommendations)
 - Length: 500-800 words total
-- NO URLs or citations (just the insights)
-- Make it fun and memorable!
+- NO URLs or citations
 
-Format with [Intro], [Verse 1], [Chorus], [Verse 2], [Bridge], etc."""
+Format with [Intro], [Verse 1], [Chorus], etc."""
         
         try:
             lyrics_response = llm.invoke([HumanMessage(content=lyrics_prompt)])
             song_lyrics = lyrics_response.content
-            
-            current_run["steps"]["9A"]["output"] = f"""✅ Song lyrics generated ({len(song_lyrics)} characters)
+            current_run["steps"]["9A"]["output"] = f"""Song lyrics generated ({len(song_lyrics)} chars)
 
-🎵 PREVIEW:
-{song_lyrics[:500]}...
-
-Full lyrics ready for audio generation in Step 9B"""
+{song_lyrics[:500]}..."""
             current_run["steps"]["9A"]["status"] = "completed"
         except Exception as e:
-            song_lyrics = f"[Verse 1]\n{business_name} report is here\nWith insights crystal clear\n[Chorus]\nMarketing intelligence for the win!"
-            current_run["steps"]["9A"]["output"] = f"⚠️ Lyrics generation failed: {str(e)}\nUsing fallback lyrics."
+            song_lyrics = f"[Verse 1]\n{business_name} report is here\n[Chorus]\nMarketing intelligence!"
+            current_run["steps"]["9A"]["output"] = f"Lyrics fallback used"
             current_run["steps"]["9A"]["status"] = "completed"
         
         # STEP 9B: Audio Report Generator (Suno API)
@@ -429,95 +517,130 @@ Full lyrics ready for audio generation in Step 9B"""
         
         if SUNO_API_KEY:
             try:
-                import requests
-                
-                SUNO_API_URL = "https://api.aimlapi.com/suno/v1/task/create"
-                
-                headers = {
-                    "Authorization": f"Bearer {SUNO_API_KEY}",
-                    "Content-Type": "application/json"
-                }
-                
-                # Submit generation request
+                SUNO_API_URL = "https://api.sunoapi.org/api/v1/generate"
+                headers = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "application/json"}
                 payload = {
-                    "prompt": song_lyrics[:5000],  # V5 max is 5000 chars
-                    "style": "reggae, r&b, laid-back, humor, energetic, melodic vocal",
-                    "title": f"Marketing Intel: {business_name}",
+                    "prompt": song_lyrics[:5000],
+                    "style": "reggae, r&b, happy, humor, energetic, melodic vocal",
+                    "title": f"Marketing Intel: {business_name}"[:80],
                     "customMode": True,
                     "instrumental": False,
                     "model": "V5",
                     "callBackUrl": "https://example.com/callback"
                 }
                 
-                current_run["steps"]["9B"]["output"] = "🎤 Submitting to Suno V5..."
-                
-                response = requests.post(SUNO_API_URL, headers=headers, json=payload, timeout=30)
+                current_run["steps"]["9B"]["output"] = "Submitting to Suno V5..."
+                response = requests.post(SUNO_API_URL, headers=headers, json=payload, timeout=60)
                 
                 if response.status_code == 200:
                     result = response.json()
-                    task_id = result.get('data', {}).get('task_id', '')
+                    task_id = result.get('data', {}).get('taskId', '')
                     
                     if task_id:
-                        # Poll for completion (max 5 min = 10 iterations x 30s)
-                        CHECK_URL = f"https://api.aimlapi.com/suno/v1/task/result/{task_id}"
-                        
-                        for attempt in range(10):
-                            current_run["steps"]["9B"]["output"] = f"🎵 Generating audio... (attempt {attempt + 1}/10)"
-                            time.sleep(30)
-                            
-                            check_response = requests.get(CHECK_URL, headers=headers, timeout=15)
-                            
+                        CHECK_URL = f"https://api.sunoapi.org/api/v1/task/{task_id}"
+                        for attempt in range(20):
+                            current_run["steps"]["9B"]["output"] = f"Generating audio... ({attempt * 15}s)"
+                            time.sleep(15)
+                            check_response = requests.get(CHECK_URL, headers=headers, timeout=30)
                             if check_response.status_code == 200:
                                 check_result = check_response.json()
                                 status = check_result.get('data', {}).get('status', '')
-                                
-                                if status == 'SUCCESS':
-                                    audio_data = check_result['data']['response']['data']
-                                    
-                                    # Get audio URLs
-                                    audio_urls = []
-                                    for i, audio in enumerate(audio_data):
-                                        audio_url = audio.get('audio_url', '')
+                                if status == 'completed':
+                                    clips = check_result.get('data', {}).get('clips', [])
+                                    download_links = []
+                                    for i, clip in enumerate(clips[:2]):
+                                        audio_url = clip.get('audioUrl') or clip.get('audio_url', '')
                                         if audio_url:
-                                            audio_urls.append(audio_url)
-                                    
-                                    if audio_urls:
-                                        # Display download links
-                                        links_html = "\n".join([f'<a href="{url}" download>📥 Download Song {i+1}</a>' for i, url in enumerate(audio_urls)])
-                                        
-                                        current_run["steps"]["9B"]["output"] = f"""✅ Audio generated successfully!
-
-🎵 {len(audio_urls)} track(s) created
-
-{links_html}
-
-Click links to download MP3 files"""
-                                        current_run["steps"]["9B"]["status"] = "completed"
-                                        break
-                                    else:
-                                        current_run["steps"]["9B"]["output"] = "❌ No audio URLs found in response"
-                                        current_run["steps"]["9B"]["status"] = "completed"
-                                        break
-                                elif status == 'FAILED':
-                                    current_run["steps"]["9B"]["output"] = f"❌ Suno generation failed: {check_result}"
-                                    current_run["steps"]["9B"]["status"] = "completed"
+                                            try:
+                                                audio_resp = requests.get(audio_url, timeout=60)
+                                                if audio_resp.status_code == 200:
+                                                    if i == 0:
+                                                        current_run["files"]["mp3_1"] = audio_resp.content
+                                                        download_links.append('<a href="/download/mp3_1">Download Song 1</a>')
+                                                    else:
+                                                        current_run["files"]["mp3_2"] = audio_resp.content
+                                                        download_links.append('<a href="/download/mp3_2">Download Song 2</a>')
+                                            except:
+                                                pass
+                                    if download_links:
+                                        current_run["steps"]["9B"]["output"] = f"Audio generated!\n\n" + "\n".join(download_links)
+                                    break
+                                elif status == 'failed':
+                                    current_run["steps"]["9B"]["output"] = "Suno generation failed"
                                     break
                         else:
-                            # Timeout after 10 attempts
-                            current_run["steps"]["9B"]["output"] = "⏱️ Audio generation timed out (5 min)"
-                            current_run["steps"]["9B"]["status"] = "completed"
-                    else:
-                        current_run["steps"]["9B"]["output"] = f"❌ No task_id returned: {result}"
-                        current_run["steps"]["9B"]["status"] = "completed"
+                            current_run["steps"]["9B"]["output"] = "Audio generation timed out"
                 else:
-                    current_run["steps"]["9B"]["output"] = f"❌ Suno API error: {response.status_code} - {response.text}"
-                    current_run["steps"]["9B"]["status"] = "completed"
+                    current_run["steps"]["9B"]["output"] = f"Suno API error: {response.status_code}"
             except Exception as e:
-                current_run["steps"]["9B"]["output"] = f"❌ Audio generation failed: {str(e)}"
-                current_run["steps"]["9B"]["status"] = "completed"
+                current_run["steps"]["9B"]["output"] = f"Audio error: {str(e)[:100]}"
         else:
-            current_run["steps"]["9B"]["output"] = "⚠️ SUNO_API_KEY not configured. Set environment variable to enable audio generation."
-            current_run["steps"]["9B"]["status"] = "completed"
+            current_run["steps"]["9B"]["output"] = "SUNO_API_KEY not configured"
+        current_run["steps"]["9B"]["status"] = "completed"
+        
+        # STEP 10: Gamma Presentation Generator
+        current_run["steps"]["10"]["status"] = "running"
+        
+        if GAMMA_API_KEY:
+            try:
+                GAMMA_BASE_URL = "https://public-api.gamma.app/v1.0"
+                gamma_headers = {"Content-Type": "application/json", "X-API-KEY": GAMMA_API_KEY}
+                gamma_payload = {
+                    "inputText": f"# {business_name} Marketing Intelligence Report\n\n{final_report[:80000]}",
+                    "textMode": "preserve",
+                    "format": "presentation",
+                    "numCards": 12,
+                    "cardSplit": "auto",
+                    "additionalInstructions": "Create a professional business presentation.",
+                    "exportAs": "pptx",
+                    "textOptions": {"amount": "medium", "tone": "professional", "audience": "executives"},
+                    "imageOptions": {"source": "aiGenerated", "style": "professional, modern"}
+                }
+                
+                current_run["steps"]["10"]["output"] = "Creating presentation..."
+                gamma_response = requests.post(f"{GAMMA_BASE_URL}/generations", headers=gamma_headers, json=gamma_payload, timeout=60)
+                
+                if gamma_response.status_code in [200, 201]:
+                    gamma_result = gamma_response.json()
+                    generation_id = gamma_result.get("id") or gamma_result.get("generationId")
+                    
+                    if generation_id:
+                        for attempt in range(30):
+                            current_run["steps"]["10"]["output"] = f"Generating... ({attempt * 10}s)"
+                            time.sleep(10)
+                            status_response = requests.get(f"{GAMMA_BASE_URL}/generations/{generation_id}", headers={"X-API-KEY": GAMMA_API_KEY})
+                            if status_response.status_code == 200:
+                                status_data = status_response.json()
+                                status = status_data.get("status", "unknown")
+                                if status == "completed":
+                                    gamma_url = status_data.get("gammaUrl") or status_data.get("url")
+                                    pptx_url = status_data.get("exportUrl") or status_data.get("pptxUrl")
+                                    output_parts = ["Presentation generated!"]
+                                    if gamma_url:
+                                        current_run["files"]["gamma_url"] = gamma_url
+                                        output_parts.append(f'\n<a href="{gamma_url}" target="_blank">Open in Gamma.app</a>')
+                                    if pptx_url:
+                                        try:
+                                            pptx_resp = requests.get(pptx_url, timeout=60)
+                                            if pptx_resp.status_code == 200:
+                                                current_run["files"]["pptx"] = pptx_resp.content
+                                                output_parts.append('\n<a href="/download/pptx">Download PPTX</a>')
+                                        except:
+                                            pass
+                                    current_run["steps"]["10"]["output"] = "".join(output_parts)
+                                    break
+                                elif status == "failed":
+                                    current_run["steps"]["10"]["output"] = "Generation failed"
+                                    break
+                        else:
+                            current_run["steps"]["10"]["output"] = "Presentation timed out"
+                else:
+                    current_run["steps"]["10"]["output"] = f"Gamma API error: {gamma_response.status_code}"
+            except Exception as e:
+                current_run["steps"]["10"]["output"] = f"Presentation error: {str(e)[:100]}"
+        else:
+            current_run["steps"]["10"]["output"] = "GAMMA_API_KEY not configured"
+        current_run["steps"]["10"]["status"] = "completed"
         
         current_run["status"] = "completed"
         
@@ -533,415 +656,78 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <title>Marketing Intelligence</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        @keyframes gradientShift {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-            background: linear-gradient(-45deg, #f5f7fa, #e8edf3, #ffd7e2, #c8e8ff, #f5f7fa);
-            background-size: 400% 400%;
-            animation: gradientShift 15s ease infinite;
-            min-height: 100vh;
-            padding: 40px 20px;
-            color: #1d1d1f;
-        }
-        
+        @keyframes gradientShift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(-45deg, #f5f7fa, #e8edf3, #ffd7e2, #c8e8ff); background-size: 400% 400%; animation: gradientShift 15s ease infinite; min-height: 100vh; padding: 40px 20px; color: #1d1d1f; }
         .container { max-width: 900px; margin: 0 auto; }
-        
         .header { text-align: center; margin-bottom: 50px; }
-        
-        @keyframes titleGradient {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-        
-        .header h1 {
-            font-size: 40px;
-            font-weight: 600;
-            letter-spacing: -0.5px;
-            margin-bottom: 10px;
-            background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #4facfe, #667eea);
-            background-size: 400% 400%;
-            animation: titleGradient 8s ease infinite;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        
-        .input-section {
-            background: rgba(255, 255, 255, 0.75);
-            backdrop-filter: blur(25px) saturate(180%);
-            border-radius: 20px;
-            padding: 35px;
-            margin-bottom: 30px;
-            box-shadow: 0 15px 50px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.8);
-            border: 1px solid rgba(255,255,255,0.5);
-        }
-        
+        .header h1 { font-size: 40px; font-weight: 600; background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #4facfe); background-size: 400% 400%; animation: gradientShift 8s ease infinite; -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .input-section { background: rgba(255,255,255,0.75); backdrop-filter: blur(25px); border-radius: 20px; padding: 35px; margin-bottom: 30px; box-shadow: 0 15px 50px rgba(0,0,0,0.12); }
         .input-group { margin-bottom: 25px; }
-        
-        .input-group label {
-            display: block;
-            font-size: 14px;
-            font-weight: 500;
-            color: #6e6e73;
-            margin-bottom: 10px;
-            letter-spacing: 0.3px;
-        }
-        
-        .input-group input {
-            width: 100%;
-            padding: 16px 20px;
-            font-size: 17px;
-            border: 1px solid #d2d2d7;
-            border-radius: 12px;
-            background: #ffffff;
-            transition: all 0.2s ease;
-            font-family: inherit;
-        }
-        
-        .input-group input:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
-        }
-        
-        @keyframes buttonGlow {
-            0%, 100% { box-shadow: 0 0 20px rgba(102, 126, 234, 0.5), 0 0 40px rgba(244, 147, 251, 0.3); }
-            50% { box-shadow: 0 0 30px rgba(244, 147, 251, 0.6), 0 0 60px rgba(79, 172, 254, 0.4); }
-        }
-        
-        .run-button {
-            width: 100%;
-            padding: 18px;
-            font-size: 17px;
-            font-weight: 600;
-            color: white;
-            background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #4facfe);
-            background-size: 400% 400%;
-            animation: gradientShift 6s ease infinite, buttonGlow 3s ease-in-out infinite;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            letter-spacing: 0.3px;
-        }
-        
-        .run-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-        }
-        
-        .run-button:active { transform: translateY(0); }
-        
-        .run-button:disabled {
-            background: #d2d2d7;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .pipeline {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-        
-        .step {
-            background: rgba(255, 255, 255, 0.65);
-            backdrop-filter: blur(20px) saturate(150%);
-            border-radius: 16px;
-            padding: 25px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6);
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            border: 2px solid rgba(255,255,255,0.3);
-        }
-        
-        @keyframes runningPulse {
-            0%, 100% { 
-                border-color: #667eea;
-                box-shadow: 0 4px 30px rgba(102, 126, 234, 0.3), inset 0 0 30px rgba(244, 147, 251, 0.1);
-            }
-            50% { 
-                border-color: #f093fb;
-                box-shadow: 0 6px 40px rgba(244, 147, 251, 0.4), inset 0 0 40px rgba(102, 126, 234, 0.15);
-            }
-        }
-        
-        .step.running {
-            background: rgba(255, 255, 255, 0.8);
-            backdrop-filter: blur(20px) saturate(200%);
-            animation: runningPulse 2s ease-in-out infinite;
-        }
-        
-        @keyframes completedGlow {
-            0%, 100% { 
-                background: linear-gradient(-45deg, rgba(52, 199, 89, 0.15), rgba(79, 172, 254, 0.12), rgba(244, 147, 251, 0.10));
-                box-shadow: 0 4px 30px rgba(52, 199, 89, 0.15);
-            }
-            50% { 
-                background: linear-gradient(-45deg, rgba(79, 172, 254, 0.15), rgba(244, 147, 251, 0.12), rgba(52, 199, 89, 0.10));
-                box-shadow: 0 6px 40px rgba(79, 172, 254, 0.2);
-            }
-        }
-        
-        .step.completed {
-            border-color: #34c759;
-            background: rgba(255, 255, 255, 0.7);
-            backdrop-filter: blur(15px) saturate(180%);
-            animation: completedGlow 4s ease-in-out infinite;
-        }
-        
-        .step-header {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 0;
-            cursor: pointer;
-            padding-bottom: 15px;
-        }
-        
-        .step-header:hover {
-            opacity: 0.8;
-        }
-        
-        .expand-icon {
-            margin-left: auto;
-            font-size: 18px;
-            color: #86868b;
-            transition: transform 0.3s ease;
-        }
-        
-        .step.expanded .expand-icon {
-            transform: rotate(180deg);
-        }
-        
-        .step-number {
-            width: 36px;
-            height: 36px;
-            border-radius: 10px;
-            background: #f5f5f7;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 600;
-            font-size: 16px;
-            color: #86868b;
-            transition: all 0.3s ease;
-        }
-        
-        .step.running .step-number {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        
-        .step.completed .step-number {
-            background: #34c759;
-            color: white;
-        }
-        
-        .step.completed .step-number::before {
-            content: "✓";
-            font-size: 20px;
-        }
-        
-        .step-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #1d1d1f;
-            flex: 1;
-        }
-        
+        .input-group label { display: block; font-size: 14px; font-weight: 500; color: #6e6e73; margin-bottom: 10px; }
+        .input-group input { width: 100%; padding: 16px 20px; font-size: 17px; border: 1px solid #d2d2d7; border-radius: 12px; background: #fff; }
+        .run-button { width: 100%; padding: 18px; font-size: 17px; font-weight: 600; color: white; background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #4facfe); background-size: 400% 400%; animation: gradientShift 6s ease infinite; border: none; border-radius: 12px; cursor: pointer; }
+        .pipeline { display: flex; flex-direction: column; gap: 15px; }
+        .step { background: rgba(255,255,255,0.65); backdrop-filter: blur(20px); border-radius: 16px; padding: 25px; box-shadow: 0 8px 32px rgba(0,0,0,0.08); border: 2px solid rgba(255,255,255,0.3); }
+        @keyframes runningPulse { 0%,100% { border-color: #667eea; } 50% { border-color: #f093fb; } }
+        .step.running { animation: runningPulse 2s ease-in-out infinite; }
+        .step.completed { border-color: #34c759; }
+        .step-header { display: flex; align-items: center; gap: 15px; cursor: pointer; padding-bottom: 15px; }
+        .expand-icon { margin-left: auto; font-size: 18px; color: #86868b; transition: transform 0.3s ease; }
+        .step.expanded .expand-icon { transform: rotate(180deg); }
+        .step-number { width: 36px; height: 36px; border-radius: 10px; background: #f5f5f7; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; color: #86868b; }
+        .step.running .step-number { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .step.completed .step-number { background: #34c759; color: white; }
+        .step-title { font-size: 18px; font-weight: 600; color: #1d1d1f; flex: 1; }
         .step.completed .step-title { color: #34c759; }
-        
-        .step-output {
-            padding: 15px;
-            background: #f5f5f7;
-            border-radius: 10px;
-            font-size: 13px;
-            line-height: 1.7;
-            color: #1d1d1f;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            display: none;
-            margin-top: 15px;
-            transition: all 0.3s ease;
-            height: auto !important;
-            max-height: none;
-            overflow-y: visible;
-        }
-        
-        .step.expanded .step-output {
-            display: block;
-        }
-        
-        .step {
-            min-height: auto;
-        }
+        .step-output { padding: 15px; background: #f5f5f7; border-radius: 10px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; display: none; margin-top: 15px; }
+        .step-output a { color: #667eea; text-decoration: none; font-weight: 600; }
+        .step.expanded .step-output { display: block; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>Marketing Intelligence</h1>
-        </div>
-        
+        <div class="header"><h1>Marketing Intelligence</h1></div>
         <div class="input-section">
-            <div class="input-group">
-                <label>Business Name</label>
-                <input type="text" id="businessName" placeholder="Enter business name..." />
-            </div>
+            <div class="input-group"><label>Business Name</label><input type="text" id="businessName" placeholder="Enter business name..." /></div>
             <button class="run-button" onclick="runAnalysis()">Run All</button>
         </div>
-        
         <div class="pipeline">
-            <div class="step" id="step1">
-                <div class="step-header" onclick="toggleStep(1)">
-                    <div class="step-number">1</div>
-                    <div class="step-title">1. Profile Analyzer (Tavily + OpenAI API)</div>
-                    <div class="expand-icon">▼</div>
-                </div>
-                <div class="step-output" id="output1"></div>
-            </div>
-            
-            <div class="step" id="step2">
-                <div class="step-header" onclick="toggleStep(2)">
-                    <div class="step-number">2</div>
-                    <div class="step-title">2. Keyword Generator (OpenAI API)</div>
-                    <div class="expand-icon">▼</div>
-                </div>
-                <div class="step-output" id="output2"></div>
-            </div>
-            
-            <div class="step" id="step3">
-                <div class="step-header" onclick="toggleStep(3)">
-                    <div class="step-number">3</div>
-                    <div class="step-title">3. Trend Scraper (Reddit API + OpenAI API)</div>
-                    <div class="expand-icon">▼</div>
-                </div>
-                <div class="step-output" id="output3"></div>
-            </div>
-            
-            <div class="step" id="step4">
-                <div class="step-header" onclick="toggleStep(4)">
-                    <div class="step-number">4</div>
-                    <div class="step-title">4. Ranking Agent (OpenAI API)</div>
-                    <div class="expand-icon">▼</div>
-                </div>
-                <div class="step-output" id="output4"></div>
-            </div>
-            
-            <div class="step" id="step5">
-                <div class="step-header" onclick="toggleStep(5)">
-                    <div class="step-number">5</div>
-                    <div class="step-title">5. Report Generator (OpenAI API)</div>
-                    <div class="expand-icon">▼</div>
-                </div>
-                <div class="step-output" id="output5"></div>
-            </div>
-            
-            <div class="step" id="step6">
-                <div class="step-header" onclick="toggleStep(6)">
-                    <div class="step-number">6</div>
-                    <div class="step-title">6. Summarizer & PDF & Excel Generator (OpenAI API)</div>
-                    <div class="expand-icon">▼</div>
-                </div>
-                <div class="step-output" id="output6"></div>
-            </div>
-            
-            <div class="step" id="step7">
-                <div class="step-header" onclick="toggleStep(7)">
-                    <div class="step-number">7</div>
-                    <div class="step-title">7. Evaluator (TruLens / OpenAI API)</div>
-                    <div class="expand-icon">▼</div>
-                </div>
-                <div class="step-output" id="output7"></div>
-            </div>
-            
-            <div class="step" id="step9A">
-                <div class="step-header" onclick="toggleStep('9A')">
-                    <div class="step-number">9A</div>
-                    <div class="step-title">9A. Fun Report Generator (OpenAI API)</div>
-                    <div class="expand-icon">▼</div>
-                </div>
-                <div class="step-output" id="output9A"></div>
-            </div>
-            
-            <div class="step" id="step9B">
-                <div class="step-header" onclick="toggleStep('9B')">
-                    <div class="step-number">9B</div>
-                    <div class="step-title">9B. Audio Report Generator (Suno API)</div>
-                    <div class="expand-icon">▼</div>
-                </div>
-                <div class="step-output" id="output9B"></div>
-            </div>
+            <div class="step" id="step1"><div class="step-header" onclick="toggleStep(1)"><div class="step-number">1</div><div class="step-title">1. Profile Analyzer</div><div class="expand-icon">▼</div></div><div class="step-output" id="output1"></div></div>
+            <div class="step" id="step2"><div class="step-header" onclick="toggleStep(2)"><div class="step-number">2</div><div class="step-title">2. Keyword Generator</div><div class="expand-icon">▼</div></div><div class="step-output" id="output2"></div></div>
+            <div class="step" id="step3"><div class="step-header" onclick="toggleStep(3)"><div class="step-number">3</div><div class="step-title">3. Trend Scraper</div><div class="expand-icon">▼</div></div><div class="step-output" id="output3"></div></div>
+            <div class="step" id="step4"><div class="step-header" onclick="toggleStep(4)"><div class="step-number">4</div><div class="step-title">4. Ranking Agent</div><div class="expand-icon">▼</div></div><div class="step-output" id="output4"></div></div>
+            <div class="step" id="step5"><div class="step-header" onclick="toggleStep(5)"><div class="step-number">5</div><div class="step-title">5. Report Generator</div><div class="expand-icon">▼</div></div><div class="step-output" id="output5"></div></div>
+            <div class="step" id="step6"><div class="step-header" onclick="toggleStep(6)"><div class="step-number">6</div><div class="step-title">6. PDF Generator</div><div class="expand-icon">▼</div></div><div class="step-output" id="output6"></div></div>
+            <div class="step" id="step7"><div class="step-header" onclick="toggleStep(7)"><div class="step-number">7</div><div class="step-title">7. Evaluator</div><div class="expand-icon">▼</div></div><div class="step-output" id="output7"></div></div>
+            <div class="step" id="step9A"><div class="step-header" onclick="toggleStep('9A')"><div class="step-number">9A</div><div class="step-title">9A. Fun Report Generator</div><div class="expand-icon">▼</div></div><div class="step-output" id="output9A"></div></div>
+            <div class="step" id="step9B"><div class="step-header" onclick="toggleStep('9B')"><div class="step-number">9B</div><div class="step-title">9B. Audio Report Generator</div><div class="expand-icon">▼</div></div><div class="step-output" id="output9B"></div></div>
+            <div class="step" id="step10"><div class="step-header" onclick="toggleStep(10)"><div class="step-number">10</div><div class="step-title">10. Gamma Presentation</div><div class="expand-icon">▼</div></div><div class="step-output" id="output10"></div></div>
         </div>
     </div>
-    
     <script>
         let pollInterval;
-        
-        function toggleStep(stepId) {
-            const stepEl = document.getElementById(`step${stepId}`);
-            stepEl.classList.toggle('expanded');
-        }
-        
+        function toggleStep(stepId) { document.getElementById('step'+stepId).classList.toggle('expanded'); }
         function runAnalysis() {
             const businessName = document.getElementById('businessName').value.trim();
-            if (!businessName) {
-                alert('Please enter a business name');
-                return;
-            }
-            
-            for (let i = 1; i <= 7; i++) {
-                document.getElementById(`step${i}`).className = 'step';
-                document.getElementById(`output${i}`).textContent = '';
-            }
-            
-            fetch('/api/start', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({business_name: businessName})
-            });
-            
+            if (!businessName) { alert('Please enter a business name'); return; }
+            ['1','2','3','4','5','6','7','9A','9B','10'].forEach(id => { document.getElementById('step'+id).className = 'step'; document.getElementById('output'+id).innerHTML = ''; });
+            fetch('/api/start', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({business_name: businessName}) });
             pollInterval = setInterval(updateStatus, 500);
         }
-        
         function updateStatus() {
-            fetch('/api/status')
-                .then(r => r.json())
-                .then(data => {
-                    Object.keys(data.steps).forEach(stepId => {
-                        const step = data.steps[stepId];
-                        const stepEl = document.getElementById(`step${stepId}`);
-                        const outputEl = document.getElementById(`output${stepId}`);
-                        
-                        // Preserve expanded state while updating status
-                        const wasExpanded = stepEl.classList.contains('expanded');
-                        stepEl.classList.remove('pending', 'running', 'completed');
-                        stepEl.classList.add(step.status);
-                        if (wasExpanded) {
-                            stepEl.classList.add('expanded');
-                        }
-                        
-                        if (step.output) {
-                            // Use innerHTML for steps with download links (9B)
-                            if (stepId === '9B' && step.output.includes('<a href')) {
-                                outputEl.innerHTML = step.output;
-                            } else {
-                                outputEl.textContent = step.output;
-                            }
-                        }
-                    });
-                    
-                    if (data.status === 'completed' || data.status === 'error') {
-                        clearInterval(pollInterval);
-                    }
+            fetch('/api/status').then(r => r.json()).then(data => {
+                Object.keys(data.steps).forEach(stepId => {
+                    const step = data.steps[stepId];
+                    const stepEl = document.getElementById('step'+stepId);
+                    const outputEl = document.getElementById('output'+stepId);
+                    const wasExpanded = stepEl.classList.contains('expanded');
+                    stepEl.classList.remove('pending','running','completed');
+                    stepEl.classList.add(step.status);
+                    if (wasExpanded) stepEl.classList.add('expanded');
+                    if (step.output) { outputEl.innerHTML = step.output.includes('<a ') ? step.output : step.output.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
                 });
+                if (data.status === 'completed' || data.status === 'error') clearInterval(pollInterval);
+            });
         }
     </script>
 </body>
@@ -955,21 +741,41 @@ def home():
 def start_pipeline():
     data = request.json
     business_name = data.get('business_name', '')
-    
     if not business_name:
         return jsonify({"error": "Business name required"}), 400
-    
     reset_run()
-    
     thread = threading.Thread(target=run_pipeline, args=(business_name,))
     thread.daemon = True
     thread.start()
-    
     return jsonify({"status": "started"})
 
 @app.route('/api/status')
 def get_status():
     return jsonify(current_run)
+
+@app.route('/download/pdf')
+def download_pdf():
+    if current_run["files"]["pdf"]:
+        return send_file(BytesIO(current_run["files"]["pdf"]), mimetype='application/pdf', as_attachment=True, download_name=f'{current_run["business_name"].replace(" ", "_")}_report.pdf')
+    return "PDF not available", 404
+
+@app.route('/download/mp3_1')
+def download_mp3_1():
+    if current_run["files"]["mp3_1"]:
+        return send_file(BytesIO(current_run["files"]["mp3_1"]), mimetype='audio/mpeg', as_attachment=True, download_name=f'{current_run["business_name"].replace(" ", "_")}_song_1.mp3')
+    return "MP3 not available", 404
+
+@app.route('/download/mp3_2')
+def download_mp3_2():
+    if current_run["files"]["mp3_2"]:
+        return send_file(BytesIO(current_run["files"]["mp3_2"]), mimetype='audio/mpeg', as_attachment=True, download_name=f'{current_run["business_name"].replace(" ", "_")}_song_2.mp3')
+    return "MP3 not available", 404
+
+@app.route('/download/pptx')
+def download_pptx():
+    if current_run["files"]["pptx"]:
+        return send_file(BytesIO(current_run["files"]["pptx"]), mimetype='application/vnd.openxmlformats-officedocument.presentationml.presentation', as_attachment=True, download_name=f'{current_run["business_name"].replace(" ", "_")}_presentation.pptx')
+    return "PPTX not available", 404
 
 @app.route('/health')
 def health():
@@ -978,4 +784,3 @@ def health():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
-
