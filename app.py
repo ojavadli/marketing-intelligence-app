@@ -330,14 +330,10 @@ Return JSON: {{"relevance_scores": [0.0-1.0 list]}}"""
         
         reddit_posts = relevant_posts if relevant_posts else all_scraped_posts
         
-        subs_list = "\n".join([f"  r/{s}" for s in list(discovered_subreddits)[:15]])
         current_run["steps"]["3"]["output"] = f"""Iterations: {iteration}
 Total scraped: {len(all_scraped_posts)} posts
 Relevant (>0.7): {len(relevant_posts)} posts
-Subreddits discovered: {len(discovered_subreddits)}
-
-Top Subreddits:
-{subs_list}"""
+Subreddits discovered: {len(discovered_subreddits)}"""
         current_run["steps"]["3"]["status"] = "completed"
         
         # STEP 4: Ranking Agent
@@ -401,7 +397,7 @@ Length: {len(final_report)} characters
         try:
             from fpdf import FPDF
             
-            # Helper to clean Unicode characters for PDF
+            # Helper to clean and truncate text for PDF
             def clean_text(text):
                 replacements = {
                     '\u2014': '-', '\u2013': '-', '\u2018': "'", '\u2019': "'",
@@ -411,19 +407,37 @@ Length: {len(final_report)} characters
                 }
                 for old, new in replacements.items():
                     text = text.replace(old, new)
+                # Remove URLs (they cause horizontal space issues)
+                import re
+                text = re.sub(r'https?://\S+', '[URL]', text)
                 # Remove any remaining non-ASCII
                 return text.encode('ascii', 'replace').decode('ascii')
             
+            # Break long words
+            def break_long_words(text, max_len=50):
+                words = text.split()
+                result = []
+                for word in words:
+                    if len(word) > max_len:
+                        # Break long word into chunks
+                        chunks = [word[i:i+max_len] for i in range(0, len(word), max_len)]
+                        result.extend(chunks)
+                    else:
+                        result.append(word)
+                return ' '.join(result)
+            
             pdf = FPDF()
+            pdf.set_margins(10, 10, 10)  # Smaller margins
             pdf.add_page()
-            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.set_auto_page_break(auto=True, margin=10)
             
             # Title
-            pdf.set_font('Helvetica', 'B', 18)
-            pdf.cell(0, 10, clean_text(f"{business_name} Marketing Intelligence Report"), ln=True, align='C')
-            pdf.set_font('Helvetica', '', 10)
-            pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
-            pdf.ln(10)
+            pdf.set_font('Helvetica', 'B', 16)
+            title = clean_text(f"{business_name} Marketing Intelligence Report")
+            pdf.cell(0, 10, title[:80], ln=True, align='C')
+            pdf.set_font('Helvetica', '', 9)
+            pdf.cell(0, 6, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
+            pdf.ln(8)
             
             # Clean the report text
             clean_report = clean_text(final_report)
@@ -433,34 +447,40 @@ Length: {len(final_report)} characters
             for line in lines:
                 line = line.strip()
                 if not line:
-                    pdf.ln(3)
+                    pdf.ln(2)
                     continue
                 
+                # Break long words to prevent horizontal space issues
+                line = break_long_words(line, 40)
+                
                 line_lower = line.lower()
-                if 'pain point' in line_lower:
-                    current_section = "pain"
-                    pdf.set_font('Helvetica', 'B', 14)
-                    pdf.set_text_color(139, 0, 0)
-                    pdf.multi_cell(0, 8, line)
-                elif 'recommendation' in line_lower:
-                    current_section = "rec"
-                    pdf.set_font('Helvetica', 'B', 14)
-                    pdf.set_text_color(0, 100, 0)
-                    pdf.multi_cell(0, 8, line)
-                elif 'executive summary' in line_lower or 'trend' in line_lower:
-                    current_section = "normal"
-                    pdf.set_font('Helvetica', 'B', 14)
-                    pdf.set_text_color(0, 0, 0)
-                    pdf.multi_cell(0, 8, line)
-                else:
-                    pdf.set_font('Helvetica', '', 11)
-                    if current_section == "pain":
+                try:
+                    if 'pain point' in line_lower:
+                        current_section = "pain"
+                        pdf.set_font('Helvetica', 'B', 12)
                         pdf.set_text_color(139, 0, 0)
-                    elif current_section == "rec":
+                        pdf.multi_cell(0, 6, line[:200])
+                    elif 'recommendation' in line_lower:
+                        current_section = "rec"
+                        pdf.set_font('Helvetica', 'B', 12)
                         pdf.set_text_color(0, 100, 0)
-                    else:
+                        pdf.multi_cell(0, 6, line[:200])
+                    elif 'executive summary' in line_lower or 'trend' in line_lower:
+                        current_section = "normal"
+                        pdf.set_font('Helvetica', 'B', 12)
                         pdf.set_text_color(0, 0, 0)
-                    pdf.multi_cell(0, 6, line)
+                        pdf.multi_cell(0, 6, line[:200])
+                    else:
+                        pdf.set_font('Helvetica', '', 10)
+                        if current_section == "pain":
+                            pdf.set_text_color(139, 0, 0)
+                        elif current_section == "rec":
+                            pdf.set_text_color(0, 100, 0)
+                        else:
+                            pdf.set_text_color(0, 0, 0)
+                        pdf.multi_cell(0, 5, line[:500])
+                except:
+                    pass  # Skip problematic lines
             
             pdf_bytes = pdf.output()
             current_run["files"]["pdf"] = pdf_bytes
