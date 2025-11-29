@@ -401,18 +401,33 @@ Length: {len(final_report)} characters
         try:
             from fpdf import FPDF
             
+            # Helper to clean Unicode characters for PDF
+            def clean_text(text):
+                replacements = {
+                    '\u2014': '-', '\u2013': '-', '\u2018': "'", '\u2019': "'",
+                    '\u201c': '"', '\u201d': '"', '\u2026': '...', '\u2022': '*',
+                    '\u00a0': ' ', '\u00b7': '*', '\u2212': '-', '\u00ae': '(R)',
+                    '\u2122': '(TM)', '\u00a9': '(C)', '\u00bd': '1/2', '\u00bc': '1/4',
+                }
+                for old, new in replacements.items():
+                    text = text.replace(old, new)
+                # Remove any remaining non-ASCII
+                return text.encode('ascii', 'replace').decode('ascii')
+            
             pdf = FPDF()
             pdf.add_page()
             pdf.set_auto_page_break(auto=True, margin=15)
             
             # Title
             pdf.set_font('Helvetica', 'B', 18)
-            pdf.cell(0, 10, f"{business_name} Marketing Intelligence Report", ln=True, align='C')
+            pdf.cell(0, 10, clean_text(f"{business_name} Marketing Intelligence Report"), ln=True, align='C')
             pdf.set_font('Helvetica', '', 10)
             pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
             pdf.ln(10)
             
-            lines = final_report.split('\n')
+            # Clean the report text
+            clean_report = clean_text(final_report)
+            lines = clean_report.split('\n')
             current_section = ""
             
             for line in lines:
@@ -450,7 +465,7 @@ Length: {len(final_report)} characters
             pdf_bytes = pdf.output()
             current_run["files"]["pdf"] = pdf_bytes
             
-            current_run["steps"]["6"]["output"] = f"""PDF Report Generated
+            current_run["steps"]["6"]["output"] = f"""PDF Report Generated!
 Size: {len(current_run["files"]["pdf"])} bytes
 
 <a href="/download/pdf" target="_blank">Download PDF Report</a>"""
@@ -529,56 +544,72 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
                     "customMode": True,
                     "instrumental": False,
                     "model": "V5",
-                    "callBackUrl": "https://example.com/callback"
+                    "callBackUrl": "https://webhook.site/placeholder"
                 }
                 
                 current_run["steps"]["9B"]["output"] = "Submitting to Suno V5..."
-                response = requests.post(SUNO_API_URL, headers=headers, json=payload, timeout=60)
+                response = requests.post(SUNO_API_URL, headers=headers, json=payload, timeout=120)
                 
-                if response.status_code == 200:
+                if response.status_code in [200, 201]:
                     result = response.json()
-                    task_id = result.get('data', {}).get('taskId', '')
+                    # Try multiple response formats
+                    task_id = result.get('data', {}).get('taskId') or result.get('taskId') or result.get('id', '')
                     
                     if task_id:
                         CHECK_URL = f"https://api.sunoapi.org/api/v1/task/{task_id}"
-                        for attempt in range(20):
+                        for attempt in range(30):  # Increased to 30 attempts (7.5 min)
                             current_run["steps"]["9B"]["output"] = f"Generating audio... ({attempt * 15}s)"
                             time.sleep(15)
-                            check_response = requests.get(CHECK_URL, headers=headers, timeout=30)
-                            if check_response.status_code == 200:
-                                check_result = check_response.json()
-                                status = check_result.get('data', {}).get('status', '')
-                                if status == 'completed':
-                                    clips = check_result.get('data', {}).get('clips', [])
-                                    download_links = []
-                                    for i, clip in enumerate(clips[:2]):
-                                        audio_url = clip.get('audioUrl') or clip.get('audio_url', '')
-                                        if audio_url:
-                                            try:
-                                                audio_resp = requests.get(audio_url, timeout=60)
-                                                if audio_resp.status_code == 200:
-                                                    if i == 0:
-                                                        current_run["files"]["mp3_1"] = audio_resp.content
-                                                        download_links.append('<a href="/download/mp3_1">Download Song 1</a>')
-                                                    else:
-                                                        current_run["files"]["mp3_2"] = audio_resp.content
-                                                        download_links.append('<a href="/download/mp3_2">Download Song 2</a>')
-                                            except:
-                                                pass
-                                    if download_links:
-                                        current_run["steps"]["9B"]["output"] = f"Audio generated!\n\n" + "\n".join(download_links)
-                                    break
-                                elif status == 'failed':
-                                    current_run["steps"]["9B"]["output"] = "Suno generation failed"
-                                    break
+                            try:
+                                check_response = requests.get(CHECK_URL, headers=headers, timeout=60)
+                                if check_response.status_code == 200:
+                                    check_result = check_response.json()
+                                    # Try multiple response formats
+                                    data = check_result.get('data', check_result)
+                                    status = data.get('status', '')
+                                    
+                                    if status in ['completed', 'complete', 'SUCCESS']:
+                                        # Try multiple clip formats
+                                        clips = data.get('clips', []) or data.get('songs', []) or data.get('output', [])
+                                        if not clips and data.get('audioUrl'):
+                                            clips = [{'audioUrl': data.get('audioUrl')}]
+                                        
+                                        download_links = []
+                                        for i, clip in enumerate(clips[:2]):
+                                            audio_url = clip.get('audioUrl') or clip.get('audio_url') or clip.get('url', '')
+                                            if audio_url:
+                                                try:
+                                                    audio_resp = requests.get(audio_url, timeout=120)
+                                                    if audio_resp.status_code == 200:
+                                                        if i == 0:
+                                                            current_run["files"]["mp3_1"] = audio_resp.content
+                                                            download_links.append('<a href="/download/mp3_1" target="_blank">Download Song 1</a>')
+                                                        else:
+                                                            current_run["files"]["mp3_2"] = audio_resp.content
+                                                            download_links.append('<a href="/download/mp3_2" target="_blank">Download Song 2</a>')
+                                                except Exception as dl_err:
+                                                    download_links.append(f'<a href="{audio_url}" target="_blank">External: Song {i+1}</a>')
+                                        
+                                        if download_links:
+                                            current_run["steps"]["9B"]["output"] = f"Audio generated!\n\n" + "\n".join(download_links)
+                                        else:
+                                            current_run["steps"]["9B"]["output"] = f"Audio complete but no download URLs found"
+                                        break
+                                    elif status in ['failed', 'error', 'FAILED']:
+                                        current_run["steps"]["9B"]["output"] = f"Suno generation failed: {data.get('error', 'Unknown')}"
+                                        break
+                            except Exception as poll_err:
+                                pass
                         else:
-                            current_run["steps"]["9B"]["output"] = "Audio generation timed out"
+                            current_run["steps"]["9B"]["output"] = "Audio generation timed out (7.5 min)"
+                    else:
+                        current_run["steps"]["9B"]["output"] = f"No task ID in response: {str(result)[:200]}"
                 else:
-                    current_run["steps"]["9B"]["output"] = f"Suno API error: {response.status_code}"
+                    current_run["steps"]["9B"]["output"] = f"Suno API error: {response.status_code} - {response.text[:100]}"
             except Exception as e:
-                current_run["steps"]["9B"]["output"] = f"Audio error: {str(e)[:100]}"
+                current_run["steps"]["9B"]["output"] = f"Audio error: {str(e)[:150]}"
         else:
-            current_run["steps"]["9B"]["output"] = "SUNO_API_KEY not configured"
+            current_run["steps"]["9B"]["output"] = "SUNO_API_KEY not configured. Add it in Railway Variables."
         current_run["steps"]["9B"]["status"] = "completed"
         
         # STEP 10: Gamma Presentation Generator
@@ -588,61 +619,76 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
             try:
                 GAMMA_BASE_URL = "https://public-api.gamma.app/v1.0"
                 gamma_headers = {"Content-Type": "application/json", "X-API-KEY": GAMMA_API_KEY}
+                
+                # Clean text for Gamma
+                clean_report = final_report.replace('\u2014', '-').replace('\u2013', '-').replace('\u2018', "'").replace('\u2019', "'")
+                
                 gamma_payload = {
-                    "inputText": f"# {business_name} Marketing Intelligence Report\n\n{final_report[:80000]}",
+                    "inputText": f"# {business_name} Marketing Intelligence Report\n\n{clean_report[:80000]}",
                     "textMode": "preserve",
                     "format": "presentation",
                     "numCards": 12,
                     "cardSplit": "auto",
-                    "additionalInstructions": "Create a professional business presentation.",
+                    "additionalInstructions": "Create a professional business presentation with clear sections.",
                     "exportAs": "pptx",
                     "textOptions": {"amount": "medium", "tone": "professional", "audience": "executives"},
-                    "imageOptions": {"source": "aiGenerated", "style": "professional, modern"}
+                    "imageOptions": {"source": "aiGenerated", "style": "professional, modern, clean"}
                 }
                 
                 current_run["steps"]["10"]["output"] = "Creating presentation..."
-                gamma_response = requests.post(f"{GAMMA_BASE_URL}/generations", headers=gamma_headers, json=gamma_payload, timeout=60)
+                gamma_response = requests.post(f"{GAMMA_BASE_URL}/generations", headers=gamma_headers, json=gamma_payload, timeout=120)
                 
                 if gamma_response.status_code in [200, 201]:
                     gamma_result = gamma_response.json()
                     generation_id = gamma_result.get("id") or gamma_result.get("generationId")
                     
                     if generation_id:
-                        for attempt in range(30):
-                            current_run["steps"]["10"]["output"] = f"Generating... ({attempt * 10}s)"
+                        for attempt in range(45):  # 7.5 minutes timeout
+                            current_run["steps"]["10"]["output"] = f"Generating presentation... ({attempt * 10}s)"
                             time.sleep(10)
-                            status_response = requests.get(f"{GAMMA_BASE_URL}/generations/{generation_id}", headers={"X-API-KEY": GAMMA_API_KEY})
-                            if status_response.status_code == 200:
-                                status_data = status_response.json()
-                                status = status_data.get("status", "unknown")
-                                if status == "completed":
-                                    gamma_url = status_data.get("gammaUrl") or status_data.get("url")
-                                    pptx_url = status_data.get("exportUrl") or status_data.get("pptxUrl")
-                                    output_parts = ["Presentation generated!"]
-                                    if gamma_url:
-                                        current_run["files"]["gamma_url"] = gamma_url
-                                        output_parts.append(f'\n<a href="{gamma_url}" target="_blank">Open in Gamma.app</a>')
-                                    if pptx_url:
-                                        try:
-                                            pptx_resp = requests.get(pptx_url, timeout=60)
-                                            if pptx_resp.status_code == 200:
-                                                current_run["files"]["pptx"] = pptx_resp.content
-                                                output_parts.append('\n<a href="/download/pptx">Download PPTX</a>')
-                                        except:
-                                            pass
-                                    current_run["steps"]["10"]["output"] = "".join(output_parts)
-                                    break
-                                elif status == "failed":
-                                    current_run["steps"]["10"]["output"] = "Generation failed"
-                                    break
+                            try:
+                                status_response = requests.get(f"{GAMMA_BASE_URL}/generations/{generation_id}", headers={"X-API-KEY": GAMMA_API_KEY}, timeout=30)
+                                if status_response.status_code == 200:
+                                    status_data = status_response.json()
+                                    status = status_data.get("status", "unknown")
+                                    
+                                    if status == "completed":
+                                        gamma_url = status_data.get("gammaUrl") or status_data.get("url") or status_data.get("viewUrl")
+                                        pptx_url = status_data.get("exportUrl") or status_data.get("pptxUrl") or status_data.get("downloadUrl")
+                                        
+                                        output_parts = ["Presentation generated successfully!"]
+                                        
+                                        if gamma_url:
+                                            current_run["files"]["gamma_url"] = gamma_url
+                                            output_parts.append(f'\n\n<a href="{gamma_url}" target="_blank">Open in Gamma.app</a>')
+                                        
+                                        if pptx_url:
+                                            try:
+                                                pptx_resp = requests.get(pptx_url, timeout=120)
+                                                if pptx_resp.status_code == 200:
+                                                    current_run["files"]["pptx"] = pptx_resp.content
+                                                    output_parts.append('\n<a href="/download/pptx" target="_blank">Download PPTX Presentation</a>')
+                                            except Exception as dl_err:
+                                                output_parts.append(f'\n<a href="{pptx_url}" target="_blank">External PPTX Download</a>')
+                                        
+                                        current_run["steps"]["10"]["output"] = "".join(output_parts)
+                                        break
+                                    elif status == "failed":
+                                        error_msg = status_data.get("error", "Unknown error")
+                                        current_run["steps"]["10"]["output"] = f"Generation failed: {error_msg}"
+                                        break
+                            except Exception as poll_err:
+                                pass
                         else:
-                            current_run["steps"]["10"]["output"] = "Presentation timed out"
+                            current_run["steps"]["10"]["output"] = "Presentation generation timed out (7.5 min). Gamma may still be processing."
+                    else:
+                        current_run["steps"]["10"]["output"] = f"No generation ID returned: {str(gamma_result)[:200]}"
                 else:
-                    current_run["steps"]["10"]["output"] = f"Gamma API error: {gamma_response.status_code}"
+                    current_run["steps"]["10"]["output"] = f"Gamma API error: {gamma_response.status_code} - {gamma_response.text[:100]}"
             except Exception as e:
-                current_run["steps"]["10"]["output"] = f"Presentation error: {str(e)[:100]}"
+                current_run["steps"]["10"]["output"] = f"Presentation error: {str(e)[:150]}"
         else:
-            current_run["steps"]["10"]["output"] = "GAMMA_API_KEY not configured"
+            current_run["steps"]["10"]["output"] = "GAMMA_API_KEY not configured. Add it in Railway Variables."
         current_run["steps"]["10"]["status"] = "completed"
         
         current_run["status"] = "completed"
