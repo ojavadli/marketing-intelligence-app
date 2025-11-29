@@ -399,24 +399,18 @@ Length: {len(final_report)} characters
         current_run["steps"]["6"]["status"] = "running"
         
         try:
-            from reportlab.lib.pagesizes import letter
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.colors import HexColor
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+            from fpdf import FPDF
             
-            pdf_buffer = BytesIO()
-            doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, topMargin=50, bottomMargin=50)
-            styles = getSampleStyleSheet()
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_auto_page_break(auto=True, margin=15)
             
-            title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=18, spaceAfter=20)
-            normal_style = ParagraphStyle('Normal', parent=styles['Normal'], fontSize=11, spaceAfter=10)
-            pain_style = ParagraphStyle('Pain', parent=styles['Normal'], fontSize=11, textColor=HexColor('#8B0000'), spaceAfter=8)
-            rec_style = ParagraphStyle('Rec', parent=styles['Normal'], fontSize=11, textColor=HexColor('#006400'), spaceAfter=8)
-            
-            story = []
-            story.append(Paragraph(f"{business_name} Marketing Intelligence Report", title_style))
-            story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", normal_style))
-            story.append(Spacer(1, 20))
+            # Title
+            pdf.set_font('Helvetica', 'B', 18)
+            pdf.cell(0, 10, f"{business_name} Marketing Intelligence Report", ln=True, align='C')
+            pdf.set_font('Helvetica', '', 10)
+            pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
+            pdf.ln(10)
             
             lines = final_report.split('\n')
             current_section = ""
@@ -424,28 +418,37 @@ Length: {len(final_report)} characters
             for line in lines:
                 line = line.strip()
                 if not line:
+                    pdf.ln(3)
                     continue
+                
                 line_lower = line.lower()
                 if 'pain point' in line_lower:
                     current_section = "pain"
-                    story.append(Paragraph(line, title_style))
+                    pdf.set_font('Helvetica', 'B', 14)
+                    pdf.set_text_color(139, 0, 0)
+                    pdf.multi_cell(0, 8, line)
                 elif 'recommendation' in line_lower:
                     current_section = "rec"
-                    story.append(Paragraph(line, title_style))
+                    pdf.set_font('Helvetica', 'B', 14)
+                    pdf.set_text_color(0, 100, 0)
+                    pdf.multi_cell(0, 8, line)
                 elif 'executive summary' in line_lower or 'trend' in line_lower:
                     current_section = "normal"
-                    story.append(Paragraph(line, title_style))
+                    pdf.set_font('Helvetica', 'B', 14)
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.multi_cell(0, 8, line)
                 else:
+                    pdf.set_font('Helvetica', '', 11)
                     if current_section == "pain":
-                        story.append(Paragraph(line, pain_style))
+                        pdf.set_text_color(139, 0, 0)
                     elif current_section == "rec":
-                        story.append(Paragraph(line, rec_style))
+                        pdf.set_text_color(0, 100, 0)
                     else:
-                        story.append(Paragraph(line, normal_style))
+                        pdf.set_text_color(0, 0, 0)
+                    pdf.multi_cell(0, 6, line)
             
-            doc.build(story)
-            pdf_buffer.seek(0)
-            current_run["files"]["pdf"] = pdf_buffer.getvalue()
+            pdf_bytes = pdf.output()
+            current_run["files"]["pdf"] = pdf_bytes
             
             current_run["steps"]["6"]["output"] = f"""PDF Report Generated
 Size: {len(current_run["files"]["pdf"])} bytes
