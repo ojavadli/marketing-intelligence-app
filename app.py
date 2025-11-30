@@ -822,13 +822,28 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
             current_run["steps"]["9A"]["output"] = f"Lyrics fallback used"
             current_run["steps"]["9A"]["status"] = "completed"
         
-        # STEP 9B: Audio Report Generator (Suno API)
+        # STEP 9B: Audio Report Generator (Suno API) - UPDATED TO MATCH NOTEBOOK
         current_run["steps"]["9B"]["status"] = "running"
+        
+        # Helper function to recursively find audio URLs
+        def find_audio_urls_recursive(obj, path=""):
+            urls = []
+            if isinstance(obj, dict):
+                for key, val in obj.items():
+                    current_path = f"{path}.{key}" if path else key
+                    if key in ['audio_url', 'audioUrl', 'audio', 'mp3_url', 'download_url', 'downloadUrl']:
+                        if isinstance(val, str) and val.startswith('http'):
+                            urls.append((current_path, val))
+                    urls.extend(find_audio_urls_recursive(val, current_path))
+            elif isinstance(obj, list):
+                for idx, item in enumerate(obj):
+                    urls.extend(find_audio_urls_recursive(item, f"{path}[{idx}]"))
+            return urls
         
         if SUNO_API_KEY:
             try:
                 SUNO_API_URL = "https://api.sunoapi.org/api/v1/generate"
-                headers = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "application/json"}
+                suno_headers = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "application/json"}
                 payload = {
                     "prompt": song_lyrics[:5000],
                     "style": "reggae, r&b, happy, humor, energetic, melodic vocal",
@@ -840,68 +855,82 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
                 }
                 
                 current_run["steps"]["9B"]["output"] = "Submitting to Suno V5..."
-                response = requests.post(SUNO_API_URL, headers=headers, json=payload, timeout=120)
+                response = requests.post(SUNO_API_URL, headers=suno_headers, json=payload, timeout=60)
                 
                 if response.status_code in [200, 201]:
                     result = response.json()
-                    # Try multiple response formats
-                    task_id = result.get('data', {}).get('taskId') or result.get('taskId') or result.get('id', '')
+                    task_id = result.get('data', {}).get('taskId') or result.get('taskId', '')
                     
                     if task_id:
-                        CHECK_URL = f"https://api.sunoapi.org/api/v1/task/{task_id}"
-                        for attempt in range(30):  # Increased to 30 attempts (7.5 min)
-                            current_run["steps"]["9B"]["output"] = f"Generating audio... ({attempt * 15}s)"
-                            time.sleep(15)
+                        current_run["steps"]["9B"]["output"] = f"Task: {task_id}\nPolling for SUCCESS..."
+                        
+                        # Use correct endpoint from Suno API docs
+                        CHECK_URL = f"https://api.sunoapi.org/api/v1/generate/record-info?taskId={task_id}"
+                        
+                        for attempt in range(20):  # 20 * 30s = 10 min max
+                            time.sleep(30)
+                            current_run["steps"]["9B"]["output"] = f"Polling... ({(attempt+1)*30}s)"
+                            
                             try:
-                                check_response = requests.get(CHECK_URL, headers=headers, timeout=60)
+                                check_response = requests.get(
+                                    CHECK_URL, 
+                                    headers={"Authorization": f"Bearer {SUNO_API_KEY}"},
+                                    timeout=30
+                                )
+                                
                                 if check_response.status_code == 200:
-                                    check_result = check_response.json()
-                                    # Try multiple response formats
-                                    data = check_result.get('data', check_result)
-                                    status = data.get('status', '')
+                                    status_data = check_response.json()
                                     
-                                    if status in ['completed', 'complete', 'SUCCESS']:
-                                        # Try multiple clip formats
-                                        clips = data.get('clips', []) or data.get('songs', []) or data.get('output', [])
-                                        if not clips and data.get('audioUrl'):
-                                            clips = [{'audioUrl': data.get('audioUrl')}]
+                                    if status_data.get('code') == 200:
+                                        task_status = status_data.get('data', {}).get('status', '')
                                         
-                                        download_links = []
-                                        for i, clip in enumerate(clips[:2]):
-                                            audio_url = clip.get('audioUrl') or clip.get('audio_url') or clip.get('url', '')
-                                            if audio_url:
+                                        if task_status in ['SUCCESS', 'COMPLETE', 'success', 'complete']:
+                                            current_run["steps"]["9B"]["output"] = f"Status: {task_status}\nFinding audio URLs..."
+                                            
+                                            # Find all audio URLs recursively
+                                            all_urls = find_audio_urls_recursive(status_data)
+                                            
+                                            download_links = []
+                                            mp3_count = 0
+                                            
+                                            for path, audio_url in all_urls[:2]:  # Max 2 tracks
+                                                mp3_count += 1
                                                 try:
                                                     audio_resp = requests.get(audio_url, timeout=120)
-                                                    if audio_resp.status_code == 200:
-                                                        if i == 0:
+                                                    if audio_resp.status_code == 200 and len(audio_resp.content) > 1000:
+                                                        if mp3_count == 1:
                                                             current_run["files"]["mp3_1"] = audio_resp.content
-                                                            download_links.append('<a href="/download/mp3_1" target="_blank">Download Song 1</a>')
+                                                            download_links.append(f'<a href="/download/mp3_1" target="_blank">🎵 Download Song 1 ({len(audio_resp.content)//1024}KB)</a>')
                                                         else:
                                                             current_run["files"]["mp3_2"] = audio_resp.content
-                                                            download_links.append('<a href="/download/mp3_2" target="_blank">Download Song 2</a>')
+                                                            download_links.append(f'<a href="/download/mp3_2" target="_blank">🎵 Download Song 2 ({len(audio_resp.content)//1024}KB)</a>')
                                                 except Exception as dl_err:
-                                                    download_links.append(f'<a href="{audio_url}" target="_blank">External: Song {i+1}</a>')
-                                        
-                                        if download_links:
-                                            current_run["steps"]["9B"]["output"] = f"Audio generated!\n\n" + "\n".join(download_links)
+                                                    download_links.append(f'<a href="{audio_url}" target="_blank">🔗 External: Song {mp3_count}</a>')
+                                            
+                                            if download_links:
+                                                current_run["steps"]["9B"]["output"] = f"✅ Audio generated!\n\n" + "\n".join(download_links)
+                                            else:
+                                                current_run["steps"]["9B"]["output"] = f"Audio complete but no URLs found"
+                                            break
+                                            
+                                        elif task_status in ['FAILED', 'failed', 'ERROR', 'error']:
+                                            current_run["steps"]["9B"]["output"] = f"❌ Suno failed: {task_status}"
+                                            break
                                         else:
-                                            current_run["steps"]["9B"]["output"] = f"Audio complete but no download URLs found"
-                                        break
-                                    elif status in ['failed', 'error', 'FAILED']:
-                                        current_run["steps"]["9B"]["output"] = f"Suno generation failed: {data.get('error', 'Unknown')}"
-                                        break
+                                            current_run["steps"]["9B"]["output"] = f"Polling... ({(attempt+1)*30}s) Status: {task_status}"
+                                            
                             except Exception as poll_err:
-                                pass
+                                current_run["steps"]["9B"]["output"] = f"Poll error: {str(poll_err)[:50]}"
                         else:
-                            current_run["steps"]["9B"]["output"] = "Audio generation timed out (7.5 min)"
+                            current_run["steps"]["9B"]["output"] = f"⚠️ Timeout. Task ID: {task_id}"
                     else:
-                        current_run["steps"]["9B"]["output"] = f"No task ID in response: {str(result)[:200]}"
+                        current_run["steps"]["9B"]["output"] = f"No task ID: {str(result)[:200]}"
                 else:
-                    current_run["steps"]["9B"]["output"] = f"Suno API error: {response.status_code} - {response.text[:100]}"
+                    current_run["steps"]["9B"]["output"] = f"Suno API error: {response.status_code}"
             except Exception as e:
                 current_run["steps"]["9B"]["output"] = f"Audio error: {str(e)[:150]}"
         else:
-            current_run["steps"]["9B"]["output"] = "SUNO_API_KEY not configured. Add it in Railway Variables."
+            current_run["steps"]["9B"]["output"] = "⚠️ SUNO_API_KEY not configured"
         current_run["steps"]["9B"]["status"] = "completed"
         
         # STEP 10: Gamma Presentation Generator
