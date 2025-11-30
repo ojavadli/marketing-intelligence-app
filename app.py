@@ -593,8 +593,19 @@ Format as professional markdown report."""
             
             current_run["steps"]["5"]["output"] = f"Calling LLM... (prompt: {len(report_prompt)} chars)"
             
-            report_response = llm.invoke([HumanMessage(content=report_prompt)])
-            report_content = report_response.content
+            # Detailed logging for Railway
+            import sys
+            print(f"[STEP 5] Starting LLM call at {datetime.now()}", file=sys.stderr, flush=True)
+            print(f"[STEP 5] Prompt length: {len(report_prompt)} chars", file=sys.stderr, flush=True)
+            
+            try:
+                report_response = llm.invoke([HumanMessage(content=report_prompt)])
+                report_content = report_response.content
+                print(f"[STEP 5] LLM call completed at {datetime.now()}", file=sys.stderr, flush=True)
+                print(f"[STEP 5] Response length: {len(report_content)} chars", file=sys.stderr, flush=True)
+            except Exception as llm_error:
+                print(f"[STEP 5] LLM call FAILED: {str(llm_error)}", file=sys.stderr, flush=True)
+                raise llm_error
             
             # Add timestamp footer like notebook
             final_report = f"""{report_content}
