@@ -112,8 +112,8 @@ TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY', '')
 SUNO_API_KEY = os.environ.get('SUNO_API_KEY', '')
 GAMMA_API_KEY = os.environ.get('GAMMA_API_KEY', '')
 
-llm_json = ChatOpenAI(model="gpt-5.1", temperature=0, model_kwargs={"response_format": {"type": "json_object"}})
-llm = ChatOpenAI(model="gpt-5.1", temperature=0.1)
+llm_json = ChatOpenAI(model="gpt-4o", temperature=0, model_kwargs={"response_format": {"type": "json_object"}}, request_timeout=120)
+llm = ChatOpenAI(model="gpt-4o", temperature=0.1, request_timeout=120)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 # ============================================================================
@@ -299,8 +299,23 @@ Target Market: {business_profile.get('target_market', 'N/A')}"""
         # STEP 2: Keyword Generator
         current_run["steps"]["2"]["status"] = "running"
         
-        keyword_prompt = f"""Generate 200 Reddit search keywords for {business_name}.
+        keyword_prompt = f"""Generate 200 Reddit search keywords to find discussions relevant to {business_name}.
+
 Business Profile: {json.dumps(business_profile, indent=2)[:500]}
+
+IMPORTANT: Create a MIX of keyword types:
+- ~30 keywords WITH the business name (for direct mentions)
+- ~50 keywords about competitors (competitor names, "vs" comparisons)
+- ~60 keywords about the industry/category (generic industry terms)
+- ~60 keywords about pain points and use cases (problems users discuss)
+
+Example for a small influencer marketing company:
+- "influencer marketing platform" (generic)
+- "micro influencer collaboration" (use case)
+- "ugc creator marketplace" (category)
+- "[competitor] vs [other]" (competitor)
+- "[business] review" (branded)
+
 Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         
         kw_response = llm_json.invoke([HumanMessage(content=keyword_prompt)])
