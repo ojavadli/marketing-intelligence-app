@@ -528,7 +528,7 @@ Trends ({len(trends_list)}):
             else:
                 start_date = end_date = dt.now().strftime('%B %d, %Y')
             
-            # EXACT notebook prompt with all 6 sections
+            # EXACT notebook prompt with all 6 sections + CRITICAL section
             report_prompt = f"""Generate comprehensive marketing intelligence report (use date range, NOT post count) for {business_name}.
 
 BUSINESS CONTEXT:
@@ -581,31 +581,40 @@ REQUIRED SECTIONS (MUST INCLUDE ALL):
    - Prioritize by impact
 
 QUALITY REQUIREMENTS:
-- Every pain point has 2+ post citations
-- Every trend has 3+ post citations
-- Competitive positioning is addressed
-- Target audience segments are identified
-- All recommendations are specific and actionable
-- Use markdown formatting with proper headers
-- Include clickable Reddit URLs
+✓ Every pain point has 2+ post citations
+✓ Every trend has 3+ post citations
+✓ Competitive positioning is addressed
+✓ Target audience segments are identified
+✓ All recommendations are specific and actionable
+✓ Use markdown formatting with proper headers
+✓ Include clickable Reddit URLs
+
+CRITICAL: Ensure you address ALL original GOAL objectives:
+- Customer pain points ✓
+- Market trends ✓
+- Competitive positioning ✓
+- Target audience insights ✓
+- Actionable recommendations ✓
 
 Format as professional markdown report."""
             
             current_run["steps"]["5"]["output"] = f"Calling LLM... (prompt: {len(report_prompt)} chars)"
             
-            # Detailed logging for Railway
-            import sys
-            print(f"[STEP 5] Starting LLM call at {datetime.now()}", file=sys.stderr, flush=True)
-            print(f"[STEP 5] Prompt length: {len(report_prompt)} chars", file=sys.stderr, flush=True)
+            report_response = llm.invoke([HumanMessage(content=report_prompt)])
+            report_content = report_response.content
             
-            try:
-                report_response = llm.invoke([HumanMessage(content=report_prompt)])
-                report_content = report_response.content
-                print(f"[STEP 5] LLM call completed at {datetime.now()}", file=sys.stderr, flush=True)
-                print(f"[STEP 5] Response length: {len(report_content)} chars", file=sys.stderr, flush=True)
-            except Exception as llm_error:
-                print(f"[STEP 5] LLM call FAILED: {str(llm_error)}", file=sys.stderr, flush=True)
-                raise llm_error
+            # Validate report completeness (like notebook)
+            validation_checks = {
+                'has_executive': 'Executive Summary' in report_content or 'executive' in report_content.lower(),
+                'has_pain_points': 'Pain Point' in report_content or 'pain' in report_content.lower(),
+                'has_trends': 'Trend' in report_content or 'trending' in report_content.lower(),
+                'has_competitive': any(word in report_content.lower() for word in ['competitor', 'competitive', 'vs', 'versus', 'alternative']),
+                'has_recommendations': 'Recommend' in report_content or 'action' in report_content.lower(),
+                'has_citations': '[Post' in report_content or 'r/' in report_content
+            }
+            
+            passed_checks = sum(validation_checks.values())
+            total_checks = len(validation_checks)
             
             # Add timestamp footer like notebook
             final_report = f"""{report_content}
@@ -613,11 +622,23 @@ Format as professional markdown report."""
 ---
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"""
             
-            current_run["steps"]["5"]["output"] = f"""Report generated successfully!
+            # Build quality checklist output
+            checklist = f"""
+📋 Quality Checklist ({passed_checks}/{total_checks} passed):
+   {'✅' if validation_checks['has_executive'] else '❌'} Executive Summary
+   {'✅' if validation_checks['has_pain_points'] else '❌'} Pain Points
+   {'✅' if validation_checks['has_trends'] else '❌'} Trending Topics
+   {'✅' if validation_checks['has_competitive'] else '❌'} Competitive Landscape
+   {'✅' if validation_checks['has_recommendations'] else '❌'} Recommendations
+   {'✅' if validation_checks['has_citations'] else '❌'} Citations
+"""
+            
+            current_run["steps"]["5"]["output"] = f"""✅ Report generated successfully!
 Length: {len(final_report)} characters
-Sections: Executive Summary, Pain Points, Trends, Competitive, Audience, Actions
+{checklist}
 
-{final_report[:500]}..."""
+{final_report}"""
+            
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
