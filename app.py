@@ -27,11 +27,14 @@ from email import encoders
 def send_email_with_attachments(recipient_email, business_name, pdf_bytes, mp3_1_bytes, mp3_2_bytes, pptx_bytes, gamma_url):
     """Send email with PDF, MP3, and PPTX attachments"""
     try:
-        # Email configuration - Hostinger SMTP
-        smtp_server = "smtp.hostinger.com"
-        smtp_port = 465
-        sender_email = "marketingintelligence@thehaip.com"
-        sender_password = "Marketingintelligence123!"
+        # Email configuration from environment variables
+        smtp_server = os.environ.get('SMTP_SERVER', 'smtp.hostinger.com')
+        smtp_port = int(os.environ.get('SMTP_PORT', '465'))
+        sender_email = os.environ.get('SENDER_EMAIL', '')
+        sender_password = os.environ.get('SENDER_PASSWORD', '')
+        
+        if not sender_email or not sender_password:
+            return False, "Email credentials not configured in environment variables"
         
         # Create message
         msg = MIMEMultipart()
