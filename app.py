@@ -520,102 +520,119 @@ Details: {error_details[:500]}"""
         
         current_run["steps"]["5"]["status"] = "completed"
         
-        # STEP 6: PDF Generator
+        # STEP 6: PDF Generator - Matching notebook style
         current_run["steps"]["6"]["status"] = "running"
         
         try:
             from fpdf import FPDF
+            import re
             
-            # Helper to clean and truncate text for PDF
+            # Helper to clean text for PDF
             def clean_text(text):
                 replacements = {
                     '\u2014': '-', '\u2013': '-', '\u2018': "'", '\u2019': "'",
                     '\u201c': '"', '\u201d': '"', '\u2026': '...', '\u2022': '*',
-                    '\u00a0': ' ', '\u00b7': '*', '\u2212': '-', '\u00ae': '(R)',
-                    '\u2122': '(TM)', '\u00a9': '(C)', '\u00bd': '1/2', '\u00bc': '1/4',
+                    '\u25a0': '-', '\u2011': '-', '\u00a0': ' ', '\u00b7': '*',
                 }
                 for old, new in replacements.items():
                     text = text.replace(old, new)
-                # Remove URLs (they cause horizontal space issues)
-                import re
-                text = re.sub(r'https?://\S+', '[URL]', text)
-                # Remove any remaining non-ASCII
                 return text.encode('ascii', 'replace').decode('ascii')
             
-            # Break long words
-            def break_long_words(text, max_len=50):
-                words = text.split()
-                result = []
-                for word in words:
-                    if len(word) > max_len:
-                        # Break long word into chunks
-                        chunks = [word[i:i+max_len] for i in range(0, len(word), max_len)]
-                        result.extend(chunks)
-                    else:
-                        result.append(word)
-                return ' '.join(result)
-            
             pdf = FPDF()
-            pdf.set_margins(10, 10, 10)  # Smaller margins
+            pdf.set_margins(25, 25, 25)  # 1 inch margins like notebook
             pdf.add_page()
-            pdf.set_auto_page_break(auto=True, margin=10)
+            pdf.set_auto_page_break(auto=True, margin=25)
             
-            # Title
-            pdf.set_font('Helvetica', 'B', 16)
-            title = clean_text(f"{business_name} Marketing Intelligence Report")
-            pdf.cell(0, 10, title[:80], ln=True, align='C')
-            pdf.set_font('Helvetica', '', 9)
-            pdf.cell(0, 6, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
+            # Title - Blue color like notebook
+            pdf.set_font('Helvetica', 'B', 24)
+            pdf.set_text_color(21, 101, 192)  # #1565C0 blue
+            pdf.cell(0, 15, clean_text(f"Marketing Intelligence Report:"), ln=True, align='C')
+            pdf.cell(0, 15, clean_text(business_name), ln=True, align='C')
             pdf.ln(8)
             
-            # Clean the report text
-            clean_report = clean_text(final_report)
-            lines = clean_report.split('\n')
-            current_section = ""
+            # Metadata
+            pdf.set_font('Helvetica', 'I', 11)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(0, 6, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
+            pdf.cell(0, 6, "Analysis Period: Past 7 days", ln=True, align='C')
+            pdf.ln(15)
             
-            for line in lines:
+            # Process report line by line
+            current_section = "normal"
+            
+            for line in final_report.split('\n'):
                 line = line.strip()
-                if not line:
-                    pdf.ln(2)
+                if not line or line == '---':
+                    pdf.ln(3)
                     continue
                 
-                # Break long words to prevent horizontal space issues
-                line = break_long_words(line, 40)
-                
+                line = clean_text(line)
                 line_lower = line.lower()
+                
+                # Detect section headers (## or # markdown)
+                is_header = line.startswith('#') or line.startswith('**')
+                header_text = line.replace('##', '').replace('#', '').replace('**', '').strip()
+                
                 try:
-                    if 'pain point' in line_lower:
-                        current_section = "pain"
-                        pdf.set_font('Helvetica', 'B', 12)
-                        pdf.set_text_color(139, 0, 0)
-                        pdf.multi_cell(0, 6, line[:200])
-                    elif 'recommendation' in line_lower:
-                        current_section = "rec"
-                        pdf.set_font('Helvetica', 'B', 12)
-                        pdf.set_text_color(0, 100, 0)
-                        pdf.multi_cell(0, 6, line[:200])
-                    elif 'executive summary' in line_lower or 'trend' in line_lower:
-                        current_section = "normal"
-                        pdf.set_font('Helvetica', 'B', 12)
-                        pdf.set_text_color(0, 0, 0)
-                        pdf.multi_cell(0, 6, line[:200])
-                    else:
-                        pdf.set_font('Helvetica', '', 10)
+                    if is_header:
+                        pdf.ln(8)
+                        pdf.set_font('Helvetica', 'B', 16)
+                        
+                        # Color code by section type
+                        if any(w in line_lower for w in ['pain', 'concern', 'issue', 'problem']):
+                            current_section = "pain"
+                            pdf.set_text_color(139, 0, 0)  # Dark red
+                        elif any(w in line_lower for w in ['trend', 'emerging', 'topic']):
+                            current_section = "trend"
+                            pdf.set_text_color(0, 0, 139)  # Dark blue
+                        elif any(w in line_lower for w in ['action', 'recommend', 'suggestion']):
+                            current_section = "action"
+                            pdf.set_text_color(0, 100, 0)  # Dark green
+                        elif 'executive' in line_lower or 'summary' in line_lower:
+                            current_section = "summary"
+                            pdf.set_text_color(0, 0, 0)  # Black
+                        else:
+                            pdf.set_text_color(0, 0, 0)
+                        
+                        pdf.multi_cell(0, 8, header_text[:150])
+                        pdf.ln(4)
+                    
+                    # Numbered items (1. 2. 3.)
+                    elif re.match(r'^\d+\.', line):
+                        pdf.set_font('Helvetica', 'B', 13)
                         if current_section == "pain":
                             pdf.set_text_color(139, 0, 0)
-                        elif current_section == "rec":
+                        elif current_section == "trend":
+                            pdf.set_text_color(0, 0, 139)
+                        elif current_section == "action":
                             pdf.set_text_color(0, 100, 0)
                         else:
                             pdf.set_text_color(0, 0, 0)
-                        pdf.multi_cell(0, 5, line[:500])
+                        pdf.multi_cell(0, 7, line[:300])
+                        pdf.ln(3)
+                    
+                    # Regular body text
+                    elif len(line) > 3:
+                        pdf.set_font('Helvetica', '', 11)
+                        if current_section == "pain":
+                            pdf.set_text_color(60, 60, 60)
+                        elif current_section == "trend":
+                            pdf.set_text_color(60, 60, 60)
+                        elif current_section == "action":
+                            pdf.set_text_color(60, 60, 60)
+                        else:
+                            pdf.set_text_color(40, 40, 40)
+                        pdf.multi_cell(0, 6, line[:500])
+                        pdf.ln(2)
                 except:
-                    pass  # Skip problematic lines
+                    pass
             
             pdf_bytes = pdf.output()
             current_run["files"]["pdf"] = pdf_bytes
             
             current_run["steps"]["6"]["output"] = f"""PDF Report Generated!
 Size: {len(current_run["files"]["pdf"])} bytes
+Style: Color-coded sections (Pain=Red, Trends=Blue, Actions=Green)
 
 <a href="/download/pdf" target="_blank">Download PDF Report</a>"""
             
