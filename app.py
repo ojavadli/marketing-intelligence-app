@@ -95,9 +95,17 @@ Marketing Intelligence Team
         # Send email via SSL
         import ssl
         context = ssl.create_default_context()
+        # Handle multiple recipients (separated by ; or ,)
+        recipients = [e.strip() for e in recipient_email.replace(';', ',').split(',') if e.strip()]
+        
         with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context) as server:
             server.login(sender_email, sender_password)
-            server.sendmail(sender_email, recipient_email, msg.as_string())
+            for recipient in recipients:
+                try:
+                    msg.replace_header('To', recipient)
+                except:
+                    msg['To'] = recipient
+                server.sendmail(sender_email, recipient, msg.as_string())
         
         return True, "Email sent successfully"
     except Exception as e:
@@ -329,13 +337,13 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         # STEP 3: ENHANCED SCRAPER - Exact match to notebook
         current_run["steps"]["3"]["status"] = "running"
         
-        # Configuration - EXACT match to notebook
-        TARGET_POSTS = 20
-        RELEVANCE_THRESHOLD = 0.7
-        max_iterations = 4
-        TIME_LIMIT = 30
-        REQUEST_DELAY = 2  # EXACT: 2 seconds like notebook
-        MIN_COMMENTS = 2   # EXACT: 2 comments like notebook
+        # Configuration - Optimized for Railway (faster but still effective)
+        TARGET_POSTS = 15  # Reduced for faster completion
+        RELEVANCE_THRESHOLD = 0.6  # Slightly lower to get more posts
+        max_iterations = 3  # Reduced iterations
+        TIME_LIMIT = 20  # Reduced time per iteration
+        REQUEST_DELAY = 1.5  # Slightly faster
+        MIN_COMMENTS = 1  # Lower threshold
         
         all_scraped_posts = []
         relevant_posts = []
@@ -420,6 +428,7 @@ Posts: {json.dumps(batch_summary, indent=2)[:3000]}
 Return JSON: {{"relevance_scores": [0.0-1.0 list]}}"""
                 
                 try:
+                    current_run["steps"]["3"]["output"] = f"Iteration {iteration}: Filtering {len(batch_posts)} posts..."
                     filter_resp = llm_json.invoke([HumanMessage(content=filter_prompt)])
                     scores = json.loads(filter_resp.content).get('relevance_scores', [])
                     
