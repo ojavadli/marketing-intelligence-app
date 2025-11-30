@@ -266,6 +266,16 @@ def run_pipeline(business_name):
     """Execute the entire marketing intelligence pipeline"""
     global current_run
     
+    import traceback
+    import sys
+    
+    def log_error(step, error):
+        """Log error to step output"""
+        error_msg = f"ERROR in {step}: {str(error)[:200]}\nTraceback: {traceback.format_exc()[:300]}"
+        print(error_msg, file=sys.stderr)
+        current_run["steps"][step]["output"] = error_msg
+        current_run["steps"][step]["status"] = "completed"
+    
     business_profile = {}
     keywords = []
     reddit_posts = []
@@ -337,13 +347,13 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         # STEP 3: ENHANCED SCRAPER - Exact match to notebook
         current_run["steps"]["3"]["status"] = "running"
         
-        # Configuration - Optimized for Railway (faster but still effective)
-        TARGET_POSTS = 15  # Reduced for faster completion
-        RELEVANCE_THRESHOLD = 0.6  # Slightly lower to get more posts
-        max_iterations = 3  # Reduced iterations
-        TIME_LIMIT = 20  # Reduced time per iteration
-        REQUEST_DELAY = 1.5  # Slightly faster
-        MIN_COMMENTS = 1  # Lower threshold
+        # Configuration - EXACT match to notebook
+        TARGET_POSTS = 20
+        RELEVANCE_THRESHOLD = 0.7
+        max_iterations = 4
+        TIME_LIMIT = 30
+        REQUEST_DELAY = 2  # EXACT: 2 seconds like notebook
+        MIN_COMMENTS = 2   # EXACT: 2 comments like notebook
         
         all_scraped_posts = []
         relevant_posts = []
@@ -969,8 +979,16 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
         current_run["status"] = "completed"
         
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         current_run["status"] = "error"
-        print(f"Pipeline error: {e}")
+        # Find which step was running and log the error there
+        for step_id in ["1", "2", "3", "4", "5", "6", "7", "9A", "9B", "10"]:
+            if current_run["steps"][step_id]["status"] == "running":
+                current_run["steps"][step_id]["output"] = f"CRASH: {str(e)[:200]}\n{error_details[:500]}"
+                current_run["steps"][step_id]["status"] = "completed"
+                break
+        print(f"Pipeline error: {e}\n{error_details}")
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
