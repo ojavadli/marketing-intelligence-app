@@ -431,7 +431,7 @@ Subreddits discovered: {len(discovered_subreddits)}"""
                 "post_id": idx,
                 "title": post.get('title', '')[:300],
                 "subreddit": post.get('subreddit', ''),
-                "upvotes": post.get('num_upvotes', 0),
+                "upvotes": post.get('score', post.get('num_upvotes', 0)),
                 "comments": post.get('num_comments', 0)
             })
         
@@ -462,19 +462,24 @@ Trends ({len(trends_list)}):
         # STEP 5: Report Generator
         current_run["steps"]["5"]["status"] = "running"
         
-        report_prompt = f"""Generate marketing intelligence report for {business_name}.
+        try:
+            report_prompt = f"""Generate marketing intelligence report for {business_name}.
 Profile: {json.dumps(business_profile, indent=2)[:500]}
 Insights: {json.dumps(ranked_data, indent=2)[:2000]}
 Include: Executive Summary (as paragraph, not bullets), Pain Points, Trends, Recommendations.
 Do NOT include "Posts Analyzed: XX" line."""
-        
-        report_response = llm.invoke([HumanMessage(content=report_prompt)])
-        final_report = report_response.content
-        
-        current_run["steps"]["5"]["output"] = f"""Report generated
+            
+            report_response = llm.invoke([HumanMessage(content=report_prompt)])
+            final_report = report_response.content
+            
+            current_run["steps"]["5"]["output"] = f"""Report generated
 Length: {len(final_report)} characters
 
 {final_report}"""
+        except Exception as e:
+            final_report = f"Error generating report: {str(e)[:100]}"
+            current_run["steps"]["5"]["output"] = f"Report generation failed: {str(e)[:200]}"
+        
         current_run["steps"]["5"]["status"] = "completed"
         
         # STEP 6: PDF Generator
