@@ -474,49 +474,112 @@ Trends ({len(trends_list)}):
 {trends_text if trends_text else '  None identified'}"""
         current_run["steps"]["4"]["status"] = "completed"
         
-        # STEP 5: Report Generator
+        # STEP 5: Report Generator - EXACT MATCH TO NOTEBOOK
         current_run["steps"]["5"]["status"] = "running"
         current_run["steps"]["5"]["output"] = "Starting report generation..."
         
         try:
-            # Build prompt
-            profile_str = json.dumps(business_profile, indent=2)[:500] if business_profile else "{}"
-            insights_str = json.dumps(ranked_data, indent=2)[:2000] if ranked_data else "{}"
+            from datetime import datetime as dt
             
-            report_prompt = f"""Generate a marketing intelligence report for {business_name}.
-
-Business Profile:
-{profile_str}
-
-Key Insights:
-{insights_str}
-
-Include these sections:
-1. Executive Summary (as a paragraph, not bullets)
-2. Pain Points
-3. Trends  
-4. Recommendations
-
-Do NOT include "Posts Analyzed: XX" line."""
+            # Calculate date range from posts (like notebook)
+            if reddit_posts:
+                timestamps = [p.get('created_utc', 0) for p in reddit_posts if p.get('created_utc')]
+                if timestamps:
+                    oldest_post = min(timestamps)
+                    newest_post = max(timestamps)
+                    start_date = dt.fromtimestamp(oldest_post).strftime('%B %d, %Y')
+                    end_date = dt.fromtimestamp(newest_post).strftime('%B %d, %Y')
+                else:
+                    start_date = end_date = dt.now().strftime('%B %d, %Y')
+            else:
+                start_date = end_date = dt.now().strftime('%B %d, %Y')
             
-            current_run["steps"]["5"]["output"] = f"Calling LLM... (prompt length: {len(report_prompt)} chars)"
+            # EXACT notebook prompt with all 6 sections
+            report_prompt = f"""Generate comprehensive marketing intelligence report (use date range, NOT post count) for {business_name}.
+
+BUSINESS CONTEXT:
+- Industry: {business_profile.get('industry', 'N/A')}
+- Target Market: {business_profile.get('target_market', 'N/A')}
+- Analysis Period: {start_date} to {end_date}
+- Posts Analyzed: {len(reddit_posts)} (internal only - do not mention in report)
+
+DATA AVAILABLE:
+Pain Points: {json.dumps(ranked_data.get('pain_points', [])[:5], indent=2)}
+Trends: {json.dumps(ranked_data.get('overall_trends', [])[:5], indent=2)}
+
+CRITICAL DATE REQUIREMENT:
+- Write "Based on analysis of discussions from {start_date} to {end_date}"
+- DO NOT write "Based on analysis of XX posts" or mention post counts
+- Use date ranges ONLY
+
+REQUIRED SECTIONS (MUST INCLUDE ALL):
+
+1. EXECUTIVE SUMMARY (ONE flowing paragraph, 150+ words)
+   - Synthesize top 3-5 findings with inline citations
+   - Format: [Post #X: r/subreddit](permalink)
+   - NO bullet points - continuous narrative
+
+2. PAIN POINTS (5-8 specific pain points)
+   - Each must be SPECIFIC with numbers/details
+   - Each must cite 2+ supporting posts
+   - Include severity indicators (High/Medium/Low)
+   - Group by theme (pricing, UX, features, support, etc.)
+
+3. TRENDING TOPICS (5-8 trends)
+   - Each must include timeframe ("past week", "recently")
+   - Each must cite 3+ supporting posts
+   - Include momentum (Rising/Stable/Declining)
+   - Focus on actionable patterns
+
+4. COMPETITIVE LANDSCAPE (REQUIRED - often missing!)
+   - Mention at least 2-3 competitors
+   - Include "vs" discussions and switching intent
+   - Cite comparison posts
+
+5. TARGET AUDIENCE INSIGHTS
+   - User segments identified (students, professionals, etc.)
+   - Demographics and behaviors from posts
+   - Community patterns
+
+6. RECOMMENDED ACTIONS (3-5 specific marketing recommendations)
+   - Each must be actionable and specific
+   - Link to pain points or trends
+   - Prioritize by impact
+
+QUALITY REQUIREMENTS:
+- Every pain point has 2+ post citations
+- Every trend has 3+ post citations
+- Competitive positioning is addressed
+- Target audience segments are identified
+- All recommendations are specific and actionable
+- Use markdown formatting with proper headers
+- Include clickable Reddit URLs
+
+Format as professional markdown report."""
+            
+            current_run["steps"]["5"]["output"] = f"Calling LLM... (prompt: {len(report_prompt)} chars)"
             
             report_response = llm.invoke([HumanMessage(content=report_prompt)])
-            final_report = report_response.content
+            report_content = report_response.content
+            
+            # Add timestamp footer like notebook
+            final_report = f"""{report_content}
+
+---
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"""
             
             current_run["steps"]["5"]["output"] = f"""Report generated successfully!
 Length: {len(final_report)} characters
+Sections: Executive Summary, Pain Points, Trends, Competitive, Audience, Actions
 
-{final_report}"""
+{final_report[:500]}..."""
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            final_report = f"Error: {str(e)[:200]}"
+            final_report = f"# Report for {business_name}\n\nError generating report: {str(e)[:200]}"
             current_run["steps"]["5"]["output"] = f"""Report generation failed!
-
 Error: {str(e)}
-
-Details: {error_details[:500]}"""
+Details: {error_details[:300]}"""
         
         current_run["steps"]["5"]["status"] = "completed"
         
