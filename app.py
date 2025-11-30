@@ -660,6 +660,24 @@ Details: {error_details[:300]}"""
                         pdf.multi_cell(0, 8, header_text[:150])
                         pdf.ln(4)
                     
+                    # Links [text](url) - display in gray italic like notebook
+                    elif '[' in line and '](' in line:
+                        import re as regex
+                        match = regex.search(r'\[(.+?)\]\((.+?)\)', line)
+                        if match:
+                            link_desc = match.group(1)
+                            url = match.group(2)
+                            pdf.set_font('Helvetica', 'I', 9)
+                            pdf.set_text_color(128, 128, 128)  # Gray
+                            pdf.multi_cell(0, 5, f"{link_desc}")
+                            pdf.set_font('Helvetica', '', 8)
+                            pdf.multi_cell(0, 4, url[:80])
+                            pdf.ln(2)
+                        else:
+                            pdf.set_font('Helvetica', '', 11)
+                            pdf.set_text_color(40, 40, 40)
+                            pdf.multi_cell(0, 6, line[:500])
+                    
                     # Numbered items (1. 2. 3.)
                     elif re.match(r'^\d+\.', line):
                         pdf.set_font('Helvetica', 'B', 13)
