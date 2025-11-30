@@ -578,8 +578,20 @@ Format as professional markdown report."""
             
             current_run["steps"]["5"]["output"] = f"Calling LLM... (prompt: {len(report_prompt)} chars)"
             
-            report_response = llm.invoke([HumanMessage(content=report_prompt)])
-            report_content = report_response.content
+            # Use ThreadPoolExecutor for forced timeout
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+            
+            def call_llm():
+                return llm.invoke([HumanMessage(content=report_prompt)])
+            
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(call_llm)
+                try:
+                    report_response = future.result(timeout=120)  # 2 minute hard timeout
+                    report_content = report_response.content
+                except FuturesTimeoutError:
+                    report_content = f"# Report for {business_name}\n\nReport generation timed out after 2 minutes. The LLM did not respond in time."
+                    current_run["steps"]["5"]["output"] = "LLM call timed out after 2 minutes"
             
             # Add timestamp footer like notebook
             final_report = f"""{report_content}
