@@ -112,8 +112,8 @@ TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY', '')
 SUNO_API_KEY = os.environ.get('SUNO_API_KEY', '')
 GAMMA_API_KEY = os.environ.get('GAMMA_API_KEY', '')
 
-llm_json = ChatOpenAI(model="gpt-4o", temperature=0, model_kwargs={"response_format": {"type": "json_object"}}, request_timeout=120)
-llm = ChatOpenAI(model="gpt-4o", temperature=0.1, request_timeout=120)
+llm_json = ChatOpenAI(model="gpt-5.1", temperature=0, model_kwargs={"response_format": {"type": "json_object"}}, request_timeout=180)
+llm = ChatOpenAI(model="gpt-5.1", temperature=0.1, request_timeout=180)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 # ============================================================================
@@ -476,24 +476,47 @@ Trends ({len(trends_list)}):
         
         # STEP 5: Report Generator
         current_run["steps"]["5"]["status"] = "running"
+        current_run["steps"]["5"]["output"] = "Starting report generation..."
         
         try:
-            report_prompt = f"""Generate marketing intelligence report for {business_name}.
-Profile: {json.dumps(business_profile, indent=2)[:500]}
-Insights: {json.dumps(ranked_data, indent=2)[:2000]}
-Include: Executive Summary (as paragraph, not bullets), Pain Points, Trends, Recommendations.
+            # Build prompt
+            profile_str = json.dumps(business_profile, indent=2)[:500] if business_profile else "{}"
+            insights_str = json.dumps(ranked_data, indent=2)[:2000] if ranked_data else "{}"
+            
+            report_prompt = f"""Generate a marketing intelligence report for {business_name}.
+
+Business Profile:
+{profile_str}
+
+Key Insights:
+{insights_str}
+
+Include these sections:
+1. Executive Summary (as a paragraph, not bullets)
+2. Pain Points
+3. Trends  
+4. Recommendations
+
 Do NOT include "Posts Analyzed: XX" line."""
+            
+            current_run["steps"]["5"]["output"] = f"Calling LLM... (prompt length: {len(report_prompt)} chars)"
             
             report_response = llm.invoke([HumanMessage(content=report_prompt)])
             final_report = report_response.content
             
-            current_run["steps"]["5"]["output"] = f"""Report generated
+            current_run["steps"]["5"]["output"] = f"""Report generated successfully!
 Length: {len(final_report)} characters
 
 {final_report}"""
         except Exception as e:
-            final_report = f"Error generating report: {str(e)[:100]}"
-            current_run["steps"]["5"]["output"] = f"Report generation failed: {str(e)[:200]}"
+            import traceback
+            error_details = traceback.format_exc()
+            final_report = f"Error: {str(e)[:200]}"
+            current_run["steps"]["5"]["output"] = f"""Report generation failed!
+
+Error: {str(e)}
+
+Details: {error_details[:500]}"""
         
         current_run["steps"]["5"]["status"] = "completed"
         
