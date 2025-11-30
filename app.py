@@ -18,6 +18,87 @@ from langchain.schema import HumanMessage
 from tavily import TavilyClient
 import requests
 from pydantic import BaseModel
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
+
+def send_email_with_attachments(recipient_email, business_name, pdf_bytes, mp3_1_bytes, mp3_2_bytes, pptx_bytes, gamma_url):
+    """Send email with PDF, MP3, and PPTX attachments"""
+    try:
+        # Email configuration - Hostinger SMTP
+        smtp_server = "smtp.hostinger.com"
+        smtp_port = 465
+        sender_email = "marketingintelligence@thehaip.com"
+        sender_password = "Marketingintelligence123!"
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = recipient_email
+        msg['Subject'] = f"Marketing Intelligence Report: {business_name}"
+        
+        # Email body
+        body = f"""Hello,
+
+Your Marketing Intelligence analysis for "{business_name}" is complete!
+
+Attached you will find:
+- PDF Report
+- Audio Reports (MP3)
+- Presentation (PPTX){' - Gamma Link: ' + gamma_url if gamma_url else ''}
+
+Thank you for using Marketing Intelligence.
+
+Best regards,
+Marketing Intelligence Team
+"""
+        msg.attach(MIMEText(body, 'plain'))
+        
+        safe_name = business_name.replace(' ', '_')
+        
+        # Attach PDF
+        if pdf_bytes:
+            part = MIMEBase('application', 'pdf')
+            part.set_payload(pdf_bytes)
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{safe_name}_report.pdf"')
+            msg.attach(part)
+        
+        # Attach MP3 files
+        if mp3_1_bytes:
+            part = MIMEBase('audio', 'mpeg')
+            part.set_payload(mp3_1_bytes)
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{safe_name}_song_1.mp3"')
+            msg.attach(part)
+        
+        if mp3_2_bytes:
+            part = MIMEBase('audio', 'mpeg')
+            part.set_payload(mp3_2_bytes)
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{safe_name}_song_2.mp3"')
+            msg.attach(part)
+        
+        # Attach PPTX
+        if pptx_bytes:
+            part = MIMEBase('application', 'vnd.openxmlformats-officedocument.presentationml.presentation')
+            part.set_payload(pptx_bytes)
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{safe_name}_presentation.pptx"')
+            msg.attach(part)
+        
+        # Send email via SSL
+        import ssl
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context) as server:
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, recipient_email, msg.as_string())
+        
+        return True, "Email sent successfully"
+    except Exception as e:
+        return False, str(e)
 
 app = Flask(__name__)
 CORS(app)
@@ -140,6 +221,7 @@ reddit = RedditTools()
 current_run = {
     "status": "idle",
     "business_name": "",
+    "email": "",
     "steps": {
         "1": {"name": "Profile Analyzer", "status": "pending", "output": ""},
         "2": {"name": "Keyword Generator", "status": "pending", "output": ""},
@@ -166,6 +248,7 @@ def reset_run():
         current_run["steps"][step_id]["status"] = "pending"
         current_run["steps"][step_id]["output"] = ""
     current_run["status"] = "idle"
+    current_run["email"] = ""
     current_run["files"] = {"pdf": None, "mp3_1": None, "mp3_2": None, "pptx": None, "gamma_url": None}
 
 def run_pipeline(business_name):
@@ -221,8 +304,8 @@ Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         kw_data = json.loads(kw_response.content)
         keywords = kw_data.get("keywords", [])
         
-        keywords_display = "\n".join([f"  {i+1}. {kw}" for i, kw in enumerate(keywords[:50])])
-        current_run["steps"]["2"]["output"] = f"Generated {len(keywords)} keywords\n\nKeywords (first 50):\n{keywords_display}"
+        keywords_display = "\n".join([f"  {i+1}. {kw}" for i, kw in enumerate(keywords)])
+        current_run["steps"]["2"]["output"] = f"Generated {len(keywords)} keywords\n\nAll Keywords:\n{keywords_display}"
         current_run["steps"]["2"]["status"] = "completed"
         
         # STEP 3: ENHANCED SCRAPER - Exact match to notebook
@@ -711,6 +794,25 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
             current_run["steps"]["10"]["output"] = "GAMMA_API_KEY not configured. Add it in Railway Variables."
         current_run["steps"]["10"]["status"] = "completed"
         
+        # STEP 11: Send Email (if email provided)
+        if current_run.get("email"):
+            try:
+                email_success, email_msg = send_email_with_attachments(
+                    current_run["email"],
+                    business_name,
+                    current_run["files"].get("pdf"),
+                    current_run["files"].get("mp3_1"),
+                    current_run["files"].get("mp3_2"),
+                    current_run["files"].get("pptx"),
+                    current_run["files"].get("gamma_url")
+                )
+                if email_success:
+                    current_run["steps"]["10"]["output"] += f"\n\n📧 Email sent to {current_run['email']}"
+                else:
+                    current_run["steps"]["10"]["output"] += f"\n\n⚠️ Email failed: {email_msg[:50]}"
+            except Exception as e:
+                current_run["steps"]["10"]["output"] += f"\n\n⚠️ Email error: {str(e)[:50]}"
+        
         current_run["status"] = "completed"
         
     except Exception as e:
@@ -758,6 +860,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="header"><h1>Marketing Intelligence</h1></div>
         <div class="input-section">
             <div class="input-group"><label>Business Name</label><input type="text" id="businessName" placeholder="Enter business name..." /></div>
+            <div class="input-group"><label>Email (optional - receive PDF, MP3, PPTX)</label><input type="email" id="recipientEmail" placeholder="your@email.com" /></div>
             <button class="run-button" onclick="runAnalysis()">Run All</button>
         </div>
         <div class="pipeline">
@@ -780,7 +883,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const businessName = document.getElementById('businessName').value.trim();
             if (!businessName) { alert('Please enter a business name'); return; }
             ['1','2','3','4','5','6','7','9A','9B','10'].forEach(id => { document.getElementById('step'+id).className = 'step'; document.getElementById('output'+id).innerHTML = ''; });
-            fetch('/api/start', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({business_name: businessName}) });
+            const email = document.getElementById('recipientEmail').value.trim();
+            fetch('/api/start', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({business_name: businessName, email: email}) });
             pollInterval = setInterval(updateStatus, 500);
         }
         function updateStatus() {
@@ -810,9 +914,11 @@ def home():
 def start_pipeline():
     data = request.json
     business_name = data.get('business_name', '')
+    email = data.get('email', '')
     if not business_name:
         return jsonify({"error": "Business name required"}), 400
     reset_run()
+    current_run["email"] = email
     thread = threading.Thread(target=run_pipeline, args=(business_name,))
     thread.daemon = True
     thread.start()
