@@ -120,8 +120,23 @@ TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY', '')
 SUNO_API_KEY = os.environ.get('SUNO_API_KEY', '')
 GAMMA_API_KEY = os.environ.get('GAMMA_API_KEY', '')
 
-llm_json = ChatOpenAI(model="gpt-5.1", temperature=0, model_kwargs={"response_format": {"type": "json_object"}}, request_timeout=180)
-llm = ChatOpenAI(model="gpt-5.1", temperature=0.1, request_timeout=180)
+# Explicitly pass API key to ensure it's used
+if not OPENAI_API_KEY:
+    print("WARNING: OPENAI_API_KEY not set!")
+
+llm_json = ChatOpenAI(
+    model="gpt-5.1", 
+    temperature=0, 
+    model_kwargs={"response_format": {"type": "json_object"}}, 
+    request_timeout=180,
+    api_key=OPENAI_API_KEY if OPENAI_API_KEY else None
+)
+llm = ChatOpenAI(
+    model="gpt-5.1", 
+    temperature=0.1, 
+    request_timeout=180,
+    api_key=OPENAI_API_KEY if OPENAI_API_KEY else None
+)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 # ============================================================================
@@ -1122,6 +1137,14 @@ def download_pptx():
     if current_run["files"]["pptx"]:
         return send_file(BytesIO(current_run["files"]["pptx"]), mimetype='application/vnd.openxmlformats-officedocument.presentationml.presentation', as_attachment=True, download_name=f'{current_run["business_name"].replace(" ", "_")}_presentation.pptx')
     return "PPTX not available", 404
+
+# Startup check
+print(f"=== STARTUP CHECK ===")
+print(f"OPENAI_API_KEY set: {bool(OPENAI_API_KEY)}")
+print(f"TAVILY_API_KEY set: {bool(TAVILY_API_KEY)}")
+print(f"SUNO_API_KEY set: {bool(SUNO_API_KEY)}")
+print(f"GAMMA_API_KEY set: {bool(GAMMA_API_KEY)}")
+print(f"======================")
 
 @app.route('/health')
 def health():
