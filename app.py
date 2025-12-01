@@ -124,19 +124,9 @@ GAMMA_API_KEY = os.environ.get('GAMMA_API_KEY', '')
 if not OPENAI_API_KEY:
     print("WARNING: OPENAI_API_KEY not set!")
 
-llm_json = ChatOpenAI(
-    model="gpt-5.1", 
-    temperature=0, 
-    model_kwargs={"response_format": {"type": "json_object"}}, 
-    request_timeout=180,
-    api_key=OPENAI_API_KEY if OPENAI_API_KEY else None
-)
-llm = ChatOpenAI(
-    model="gpt-5.1", 
-    temperature=0.1, 
-    request_timeout=180,
-    api_key=OPENAI_API_KEY if OPENAI_API_KEY else None
-)
+# EXACT MATCH TO NOTEBOOK - no timeout settings
+llm_json = ChatOpenAI(model='gpt-5.1', temperature=0, model_kwargs={'response_format': {'type': 'json_object'}})
+llm = ChatOpenAI(model='gpt-5.1', temperature=0.1)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 # ============================================================================
