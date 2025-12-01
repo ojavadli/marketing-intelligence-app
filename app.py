@@ -762,7 +762,7 @@ Details: {error_details[:500]}"""
         
         current_run["steps"]["5"]["status"] = "completed"
         
-        # STEP 6: PDF Generator using fpdf2 - FIXED
+        # STEP 6: PDF Generator - SIMPLE BULLETPROOF VERSION
         current_run["steps"]["6"]["status"] = "running"
         current_run["steps"]["6"]["output"] = "Generating PDF..."
         
@@ -771,130 +771,110 @@ Details: {error_details[:500]}"""
             import re
             import io
             
-            class PDF(FPDF):
-                def __init__(self, biz_name):
-                    super().__init__()
-                    self.biz_name = biz_name
-                
-                def header(self):
-                    self.set_font('Helvetica', 'B', 16)
-                    self.set_text_color(21, 101, 192)
-                    self.cell(0, 10, f'Marketing Intelligence Report: {self.biz_name}', new_x='LMARGIN', new_y='NEXT', align='C')
-                    self.ln(5)
-                
-                def footer(self):
-                    self.set_y(-15)
-                    self.set_font('Helvetica', 'I', 8)
-                    self.set_text_color(128)
-                    self.cell(0, 10, f'Page {self.page_no()}', align='C')
-            
-            pdf = PDF(business_name)
+            pdf = FPDF()
             pdf.add_page()
             pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.set_margins(20, 20, 20)
             
-            # Helper to clean and break long words
-            def clean_and_break(text, max_word_len=50):
-                # Clean unicode
-                for old, new in [('—', '-'), ('–', '-'), ("'", "'"), ("'", "'"), 
-                                 ('"', '"'), ('"', '"'), ('•', '-'), ('…', '...')]:
+            # Title
+            pdf.set_font('Helvetica', 'B', 18)
+            pdf.set_text_color(21, 101, 192)
+            title = f"Marketing Report: {business_name}"
+            pdf.cell(0, 12, title.encode('latin-1', 'replace').decode('latin-1'), new_x='LMARGIN', new_y='NEXT', align='C')
+            pdf.ln(10)
+            
+            # Helper to safely add text
+            def safe_text(text, max_len=80):
+                # Remove URLs
+                text = re.sub(r'https?://[^\s]+', '', text)
+                # Remove markdown
+                text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+                text = text.replace('**', '').replace('*', '').replace('#', '')
+                # Replace unicode
+                for old, new in [('—', '-'), ('–', '-'), ('"', '"'), ('"', '"'), ("'", "'"), ("'", "'")]:
                     text = text.replace(old, new)
-                # Remove URLs completely (they cause horizontal space issues)
-                text = re.sub(r'https?://[^\s]+', '[link]', text)
-                # Break long words
-                words = text.split()
-                result = []
-                for word in words:
-                    if len(word) > max_word_len:
-                        # Break into chunks
-                        for i in range(0, len(word), max_word_len):
-                            result.append(word[i:i+max_word_len])
-                    else:
-                        result.append(word)
-                return ' '.join(result).encode('latin-1', 'ignore').decode('latin-1')
+                # Encode to latin-1
+                text = text.encode('latin-1', 'replace').decode('latin-1')
+                # Truncate
+                if len(text) > max_len:
+                    text = text[:max_len] + '...'
+                return text.strip()
             
-            # Remove markdown links
-            def strip_links(text):
-                return re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-            
-            current_section = "normal"
-            lines = final_report.split('\n') if 'final_report' in dir() else ["No report content"]
+            # Process report
+            report_text = final_report if 'final_report' in dir() else "No report content"
+            lines = report_text.split('\n')
             
             for line in lines:
                 line = line.strip()
-                if not line or line == '---' or line.startswith('Generated:'):
+                if not line or line == '---':
                     continue
                 
-                line = clean_and_break(strip_links(line))
-                
-                # Main headers
-                if line.startswith('## ') or (line.startswith('# ') and 'Marketing' not in line):
-                    header = line.replace('## ', '').replace('# ', '').strip()[:80]
-                    pdf.ln(6)
-                    if any(w in header.lower() for w in ['pain', 'concern', 'issue']):
-                        current_section = "pain"
+                # Section headers
+                if line.startswith('## ') or line.startswith('# '):
+                    pdf.ln(5)
+                    pdf.set_font('Helvetica', 'B', 12)
+                    header = safe_text(line.replace('#', '').strip(), 60)
+                    if 'pain' in header.lower():
                         pdf.set_text_color(139, 0, 0)
-                    elif any(w in header.lower() for w in ['action', 'recommend']):
-                        current_section = "action"
+                    elif 'recommend' in header.lower() or 'action' in header.lower():
                         pdf.set_text_color(0, 100, 0)
                     else:
-                        current_section = "normal"
                         pdf.set_text_color(21, 101, 192)
-                    pdf.set_font('Helvetica', 'B', 13)
-                    pdf.multi_cell(0, 7, header)
+                    if header:
+                        pdf.cell(0, 8, header, new_x='LMARGIN', new_y='NEXT')
                     pdf.ln(2)
-                
+                    
                 elif line.startswith('### '):
-                    pdf.ln(3)
-                    pdf.set_font('Helvetica', 'B', 11)
-                    pdf.set_text_color(51, 51, 51)
-                    pdf.multi_cell(0, 6, line.replace('### ', '')[:70])
-                
-                elif line.startswith('# '):
-                    continue
-                
-                elif line.startswith('**') and '**' in line[2:]:
-                    pdf.ln(2)
                     pdf.set_font('Helvetica', 'B', 10)
-                    if current_section == "pain":
-                        pdf.set_text_color(139, 0, 0)
-                    elif current_section == "action":
-                        pdf.set_text_color(0, 100, 0)
-                    else:
-                        pdf.set_text_color(0, 0, 0)
-                    pdf.multi_cell(0, 5, line.replace('**', '')[:200])
-                
-                elif len(line) > 3:
+                    pdf.set_text_color(51, 51, 51)
+                    subheader = safe_text(line.replace('###', '').strip(), 50)
+                    if subheader:
+                        pdf.cell(0, 6, subheader, new_x='LMARGIN', new_y='NEXT')
+                    
+                elif len(line) > 5:
                     pdf.set_font('Helvetica', '', 9)
-                    if current_section == "pain":
-                        pdf.set_text_color(139, 0, 0)
-                    elif current_section == "action":
-                        pdf.set_text_color(0, 100, 0)
-                    else:
-                        pdf.set_text_color(0, 0, 0)
-                    pdf.multi_cell(0, 4, line.replace('**', '').replace('*', '')[:500])
+                    pdf.set_text_color(0, 0, 0)
+                    # Split into chunks of max 70 chars
+                    clean = safe_text(line, 300)
+                    words = clean.split()
+                    current_line = ""
+                    for word in words:
+                        if len(word) > 30:
+                            word = word[:30]
+                        if len(current_line) + len(word) + 1 < 70:
+                            current_line += (" " if current_line else "") + word
+                        else:
+                            if current_line:
+                                pdf.cell(0, 5, current_line, new_x='LMARGIN', new_y='NEXT')
+                            current_line = word
+                    if current_line:
+                        pdf.cell(0, 5, current_line, new_x='LMARGIN', new_y='NEXT')
             
-            # Save to BytesIO and store for download
+            # Footer
+            pdf.ln(10)
+            pdf.set_font('Helvetica', 'I', 8)
+            pdf.set_text_color(128, 128, 128)
+            from datetime import datetime
+            pdf.cell(0, 5, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", new_x='LMARGIN', new_y='NEXT', align='C')
+            
+            # Save to BytesIO
             pdf_buffer = io.BytesIO()
             pdf.output(pdf_buffer)
             pdf_bytes = pdf_buffer.getvalue()
             
-            # Store in current_run for download route
+            # Store for download
             current_run["files"]["pdf"] = pdf_bytes
             
             size_kb = len(pdf_bytes) / 1024
             current_run["steps"]["6"]["output"] = f"""✅ PDF Generated Successfully!
 📊 Size: {size_kb:.1f} KB
-🎨 Pain Points: Dark Red
-🎨 Recommendations: Dark Green
 
 <a href="/download/pdf" target="_blank">📥 Download PDF Report</a>"""
                 
         except Exception as e:
             import traceback
-            error_details = traceback.format_exc()
-            current_run["steps"]["6"]["output"] = f"""❌ PDF generation failed!
-Error: {str(e)}
-Details: {error_details[:400]}"""
+            current_run["steps"]["6"]["output"] = f"""❌ PDF Error: {str(e)[:100]}
+{traceback.format_exc()[:300]}"""
         
         current_run["steps"]["6"]["status"] = "completed"
         
