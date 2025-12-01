@@ -302,29 +302,68 @@ def run_pipeline(business_name):
         current_run["status"] = "running"
         current_run["business_name"] = business_name
         
-        # STEP 1: Profile Analyzer
+        # STEP 1: Profile Analyzer - EXACT MATCH TO NOTEBOOK (no timeout)
         current_run["steps"]["1"]["status"] = "running"
+        current_run["steps"]["1"]["output"] = "🔍 Researching with Tavily..."
         
+        # Research with Tavily (like notebook)
         search_results = {}
         try:
-            search_results = tavily.search(f"{business_name} company industry business model", max_results=5, search_depth="advanced", timeout=7)
-        except:
+            search_results = tavily.search(
+                f"{business_name} company industry business model target market customer demographics", 
+                max_results=5, 
+                search_depth="advanced"
+            )
+            current_run["steps"]["1"]["output"] = f"Found {len(search_results.get('results', []))} sources. Extracting profile..."
+        except Exception as e:
             search_results = {"results": []}
+            current_run["steps"]["1"]["output"] = f"Tavily search failed: {str(e)[:50]}. Using fallback..."
         
-        extract_prompt = f"""Analyze {business_name} and extract business profile.
-Research: {json.dumps(search_results, indent=2)[:1000]}
-Return JSON: {{"business_name": "{business_name}", "industry": "...", "business_model": "...", "target_market": "...", "customer_demographics": "...", "products_services": [], "competitors": [], "market_position": "..."}}"""
-        
+        # Extract complete profile with OpenAI (NO timeout like notebook)
+        extract_prompt = f"""Analyze {business_name} and extract complete business profile.
+
+Research Data: {json.dumps(search_results, indent=2)[:2000]}
+
+Extract and return JSON:
+{{
+  "business_name": "official company name",
+  "industry": "specific industry sector",
+  "business_model": "how they make money",
+  "target_market": "who are their customers",
+  "customer_demographics": "age, income, interests of customers",
+  "products_services": ["product1", "product2"],
+  "competitors": ["competitor1", "competitor2"],
+  "market_position": "leader/challenger/niche"
+}}
+
+Be specific and detailed based on research data."""
+
         try:
-            response = llm_json.invoke([HumanMessage(content=extract_prompt)], timeout=8)
+            response = llm_json.invoke([HumanMessage(content=extract_prompt)])
             business_profile = json.loads(response.content)
-        except:
-            business_profile = {"business_name": business_name, "industry": "Unknown", "business_model": "Unknown", "target_market": "Unknown"}
+        except Exception as e:
+            business_profile = {
+                "business_name": business_name, 
+                "industry": "Unknown", 
+                "business_model": "Unknown", 
+                "target_market": "Unknown",
+                "customer_demographics": "Unknown",
+                "products_services": [],
+                "competitors": [],
+                "market_position": "Unknown"
+            }
         
-        output_text = f"""Business: {business_profile.get('business_name', business_name)}
-Industry: {business_profile.get('industry', 'N/A')}
-Business Model: {business_profile.get('business_model', 'N/A')}
-Target Market: {business_profile.get('target_market', 'N/A')}"""
+        # Full output like notebook
+        output_text = f"""📊 EXTRACTED BUSINESS PROFILE:
+
+🏢 Business: {business_profile.get('business_name', business_name)}
+📈 Industry: {business_profile.get('industry', 'N/A')}
+💼 Business Model: {business_profile.get('business_model', 'N/A')}
+🎯 Target Market: {business_profile.get('target_market', 'N/A')}
+👥 Demographics: {business_profile.get('customer_demographics', 'N/A')}
+🛍️ Products: {', '.join(business_profile.get('products_services', [])[:3]) or 'N/A'}
+⚔️ Competitors: {', '.join(business_profile.get('competitors', [])[:3]) or 'N/A'}
+📊 Market Position: {business_profile.get('market_position', 'N/A')}"""
         
         current_run["steps"]["1"]["output"] = output_text
         current_run["steps"]["1"]["status"] = "completed"
@@ -565,12 +604,13 @@ CRITICAL REQUIREMENTS:
         
         current_run["steps"]["4"]["status"] = "completed"
         
-        # STEP 5: REPORT GENERATOR - EXACT MATCH TO NOTEBOOK (Enhanced with Quality Checklist)
+        # STEP 5: REPORT GENERATOR - EXACT MATCH TO NOTEBOOK
         current_run["steps"]["5"]["status"] = "running"
-        current_run["steps"]["5"]["output"] = "Starting report generation..."
+        current_run["steps"]["5"]["output"] = "📝 Starting report generation..."
         
         try:
             from datetime import datetime as dt
+            import sys
             
             # Calculate date range from posts (like notebook)
             if reddit_posts:
@@ -585,7 +625,15 @@ CRITICAL REQUIREMENTS:
             else:
                 start_date = end_date = dt.now().strftime('%B %d, %Y')
             
-            # EXACT notebook prompt with all 6 sections + CRITICAL section
+            # Show data summary
+            pain_count = len(ranked_data.get('pain_points', []))
+            trend_count = len(ranked_data.get('overall_trends', []))
+            current_run["steps"]["5"]["output"] = f"""📝 Preparing report...
+📊 Data: {pain_count} pain points, {trend_count} trends
+📅 Period: {start_date} to {end_date}
+🤖 Calling GPT-5.1 (this may take 30-60 seconds)..."""
+            
+            # EXACT notebook prompt with all 6 sections
             report_prompt = f"""Generate comprehensive marketing intelligence report (use date range, NOT post count) for {business_name}.
 
 BUSINESS CONTEXT:
@@ -654,11 +702,15 @@ CRITICAL: Ensure you address ALL original GOAL objectives:
 - Actionable recommendations ✓
 
 Format as professional markdown report."""
+
+            # Log for Railway debugging
+            print(f"[STEP 5] Starting LLM call, prompt length: {len(report_prompt)} chars", file=sys.stderr, flush=True)
             
-            current_run["steps"]["5"]["output"] = f"Calling LLM... (prompt: {len(report_prompt)} chars)"
-            
+            # Make LLM call (NO timeout - let it complete)
             report_response = llm.invoke([HumanMessage(content=report_prompt)])
             report_content = report_response.content
+            
+            print(f"[STEP 5] LLM call completed, response length: {len(report_content)} chars", file=sys.stderr, flush=True)
             
             # Validate report completeness (like notebook)
             validation_checks = {
@@ -680,29 +732,33 @@ Format as professional markdown report."""
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"""
             
             # Build quality checklist output
-            checklist = f"""
-📋 Quality Checklist ({passed_checks}/{total_checks} passed):
+            checklist = f"""📋 Quality Checklist ({passed_checks}/{total_checks} passed):
    {'✅' if validation_checks['has_executive'] else '❌'} Executive Summary
    {'✅' if validation_checks['has_pain_points'] else '❌'} Pain Points
    {'✅' if validation_checks['has_trends'] else '❌'} Trending Topics
    {'✅' if validation_checks['has_competitive'] else '❌'} Competitive Landscape
    {'✅' if validation_checks['has_recommendations'] else '❌'} Recommendations
-   {'✅' if validation_checks['has_citations'] else '❌'} Citations
-"""
+   {'✅' if validation_checks['has_citations'] else '❌'} Citations"""
             
             current_run["steps"]["5"]["output"] = f"""✅ Report generated successfully!
-Length: {len(final_report)} characters
+📝 Length: {len(final_report)} characters
+
 {checklist}
 
+{'='*60}
 {final_report}"""
             
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
+            print(f"[STEP 5] ERROR: {str(e)}", file=sys.stderr, flush=True)
+            print(f"[STEP 5] Traceback: {error_details}", file=sys.stderr, flush=True)
             final_report = f"# Report for {business_name}\n\nError generating report: {str(e)[:200]}"
-            current_run["steps"]["5"]["output"] = f"""Report generation failed!
+            current_run["steps"]["5"]["output"] = f"""❌ Report generation failed!
+
 Error: {str(e)}
-Details: {error_details[:300]}"""
+
+Details: {error_details[:500]}"""
         
         current_run["steps"]["5"]["status"] = "completed"
         
