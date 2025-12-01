@@ -762,13 +762,14 @@ Details: {error_details[:500]}"""
         
         current_run["steps"]["5"]["status"] = "completed"
         
-        # STEP 6: PDF Generator using fpdf2 (no system dependencies)
+        # STEP 6: PDF Generator using fpdf2 - FIXED
         current_run["steps"]["6"]["status"] = "running"
         current_run["steps"]["6"]["output"] = "Generating PDF..."
         
         try:
             from fpdf import FPDF
             import re
+            import io
             
             class PDF(FPDF):
                 def __init__(self, biz_name):
@@ -791,124 +792,109 @@ Details: {error_details[:500]}"""
             pdf.add_page()
             pdf.set_auto_page_break(auto=True, margin=15)
             
-            # Helper to clean text for latin-1 encoding
-            def clean_text(text):
-                replacements = {
-                    '\u2014': '-', '\u2013': '-', '\u2019': "'", '\u2018': "'",
-                    '\u201c': '"', '\u201d': '"', '\u25a0': '-', '\u25cf': '-',
-                    '\u2022': '-', '\u2026': '...', '\u2713': '[OK]',
-                    '\u2705': '[OK]', '\u274c': '[X]'
-                }
-                # Also handle actual unicode chars
-                text = text.replace('\u2014', '-').replace('\u2013', '-')
-                for old, new in [('\u2014', '-'), ('\u2013', '-'), ('\u2019', "'"), 
-                                 ('\u2018', "'"), ('\u201c', '"'), ('\u201d', '"'),
-                                 ('\u25a0', '-'), ('\u2022', '-'), ('\u2026', '...'),
-                                 ('\u2705', '[OK]'), ('\u274c', '[X]')]:
+            # Helper to clean and break long words
+            def clean_and_break(text, max_word_len=50):
+                # Clean unicode
+                for old, new in [('—', '-'), ('–', '-'), ("'", "'"), ("'", "'"), 
+                                 ('"', '"'), ('"', '"'), ('•', '-'), ('…', '...')]:
                     text = text.replace(old, new)
-                # Remove emojis
-                for emoji in ['\U0001f4ca', '\U0001f4c8', '\U0001f3af', '\U0001f4bc', 
-                              '\U0001f3e2', '\U0001f465', '\U0001f6cd', '\u2694', 
-                              '\U0001f4cb', '\U0001f4dd', '\U0001f517', '\U0001f4e5']:
-                    text = text.replace(emoji, '')
-                return text.encode('latin-1', 'ignore').decode('latin-1')
+                # Remove URLs completely (they cause horizontal space issues)
+                text = re.sub(r'https?://[^\s]+', '[link]', text)
+                # Break long words
+                words = text.split()
+                result = []
+                for word in words:
+                    if len(word) > max_word_len:
+                        # Break into chunks
+                        for i in range(0, len(word), max_word_len):
+                            result.append(word[i:i+max_word_len])
+                    else:
+                        result.append(word)
+                return ' '.join(result).encode('latin-1', 'ignore').decode('latin-1')
             
-            # Remove markdown links but keep text
+            # Remove markdown links
             def strip_links(text):
                 return re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
             
             current_section = "normal"
-            lines = final_report.split('\n')
+            lines = final_report.split('\n') if 'final_report' in dir() else ["No report content"]
             
             for line in lines:
                 line = line.strip()
                 if not line or line == '---' or line.startswith('Generated:'):
                     continue
                 
-                line = clean_text(strip_links(line))
+                line = clean_and_break(strip_links(line))
                 
-                # Main headers (## Section)
-                if line.startswith('## ') or (line.startswith('# ') and 'Marketing Intelligence' not in line):
-                    header = line.replace('## ', '').replace('# ', '').strip()
-                    pdf.ln(8)
-                    
-                    # Set color based on section
-                    if any(w in header.lower() for w in ['pain', 'concern', 'issue', 'problem']):
+                # Main headers
+                if line.startswith('## ') or (line.startswith('# ') and 'Marketing' not in line):
+                    header = line.replace('## ', '').replace('# ', '').strip()[:80]
+                    pdf.ln(6)
+                    if any(w in header.lower() for w in ['pain', 'concern', 'issue']):
                         current_section = "pain"
-                        pdf.set_text_color(139, 0, 0)  # Dark red
-                    elif any(w in header.lower() for w in ['action', 'recommend', 'suggestion']):
+                        pdf.set_text_color(139, 0, 0)
+                    elif any(w in header.lower() for w in ['action', 'recommend']):
                         current_section = "action"
-                        pdf.set_text_color(0, 100, 0)  # Dark green
+                        pdf.set_text_color(0, 100, 0)
                     else:
                         current_section = "normal"
-                        pdf.set_text_color(21, 101, 192)  # Blue
-                    
-                    pdf.set_font('Helvetica', 'B', 14)
-                    pdf.multi_cell(0, 8, header)
-                    pdf.ln(3)
-                
-                # Subheaders (### Subsection)
-                elif line.startswith('### '):
-                    subheader = line.replace('### ', '').strip()
-                    pdf.ln(4)
-                    pdf.set_font('Helvetica', 'B', 12)
-                    pdf.set_text_color(51, 51, 51)
-                    pdf.multi_cell(0, 7, subheader)
+                        pdf.set_text_color(21, 101, 192)
+                    pdf.set_font('Helvetica', 'B', 13)
+                    pdf.multi_cell(0, 7, header)
                     pdf.ln(2)
                 
-                # Skip title duplicate
+                elif line.startswith('### '):
+                    pdf.ln(3)
+                    pdf.set_font('Helvetica', 'B', 11)
+                    pdf.set_text_color(51, 51, 51)
+                    pdf.multi_cell(0, 6, line.replace('### ', '')[:70])
+                
                 elif line.startswith('# '):
                     continue
                 
-                # Bold numbered items (**1. Item**)
                 elif line.startswith('**') and '**' in line[2:]:
-                    clean = line.replace('**', '').strip()
-                    pdf.ln(3)
-                    pdf.set_font('Helvetica', 'B', 11)
+                    pdf.ln(2)
+                    pdf.set_font('Helvetica', 'B', 10)
                     if current_section == "pain":
                         pdf.set_text_color(139, 0, 0)
                     elif current_section == "action":
                         pdf.set_text_color(0, 100, 0)
                     else:
                         pdf.set_text_color(0, 0, 0)
-                    pdf.multi_cell(0, 6, clean)
+                    pdf.multi_cell(0, 5, line.replace('**', '')[:200])
                 
-                # Regular paragraph
                 elif len(line) > 3:
-                    pdf.set_font('Helvetica', '', 10)
+                    pdf.set_font('Helvetica', '', 9)
                     if current_section == "pain":
                         pdf.set_text_color(139, 0, 0)
                     elif current_section == "action":
                         pdf.set_text_color(0, 100, 0)
                     else:
                         pdf.set_text_color(0, 0, 0)
-                    
-                    # Handle bold within text
-                    clean = line.replace('**', '').replace('*', '')
-                    pdf.multi_cell(0, 5, clean)
+                    pdf.multi_cell(0, 4, line.replace('**', '').replace('*', '')[:500])
             
-            # Save PDF
-            pdf_filename = f"{business_name.replace(' ', '_')}_Report.pdf"
-            pdf.output(pdf_filename)
+            # Save to BytesIO and store for download
+            pdf_buffer = io.BytesIO()
+            pdf.output(pdf_buffer)
+            pdf_bytes = pdf_buffer.getvalue()
             
-            if os.path.exists(pdf_filename):
-                size_kb = os.path.getsize(pdf_filename) / 1024
-                current_run["steps"]["6"]["output"] = f"""PDF Generated Successfully!
-File: {pdf_filename}
-Size: {size_kb:.1f} KB
-Pain Points: Dark Red
-Recommendations: Dark Green
+            # Store in current_run for download route
+            current_run["files"]["pdf"] = pdf_bytes
+            
+            size_kb = len(pdf_bytes) / 1024
+            current_run["steps"]["6"]["output"] = f"""✅ PDF Generated Successfully!
+📊 Size: {size_kb:.1f} KB
+🎨 Pain Points: Dark Red
+🎨 Recommendations: Dark Green
 
-<a href="/download/{pdf_filename}" target="_blank">Download PDF Report</a>"""
-            else:
-                current_run["steps"]["6"]["output"] = "PDF file not created"
+<a href="/download/pdf" target="_blank">📥 Download PDF Report</a>"""
                 
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            current_run["steps"]["6"]["output"] = f"""PDF generation failed!
+            current_run["steps"]["6"]["output"] = f"""❌ PDF generation failed!
 Error: {str(e)}
-Details: {error_details[:300]}"""
+Details: {error_details[:400]}"""
         
         current_run["steps"]["6"]["status"] = "completed"
         
@@ -1030,32 +1016,47 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
                                         task_status = status_data.get('data', {}).get('status', '')
                                         
                                         if task_status in ['SUCCESS', 'COMPLETE', 'success', 'complete']:
-                                            current_run["steps"]["9B"]["output"] = f"Status: {task_status}\nFinding audio URLs..."
-                                            
                                             # Find all audio URLs recursively
                                             all_urls = find_audio_urls_recursive(status_data)
+                                            current_run["steps"]["9B"]["output"] = f"Status: {task_status}\nFound {len(all_urls)} audio URL(s)..."
                                             
                                             download_links = []
                                             mp3_count = 0
                                             
-                                            for path, audio_url in all_urls[:2]:  # Max 2 tracks
-                                                mp3_count += 1
-                                                try:
-                                                    audio_resp = requests.get(audio_url, timeout=120)
-                                                    if audio_resp.status_code == 200 and len(audio_resp.content) > 1000:
-                                                        if mp3_count == 1:
-                                                            current_run["files"]["mp3_1"] = audio_resp.content
-                                                            download_links.append(f'<a href="/download/mp3_1" target="_blank">🎵 Download Song 1 ({len(audio_resp.content)//1024}KB)</a>')
+                                            if all_urls:
+                                                for path, audio_url in all_urls[:2]:  # Max 2 tracks
+                                                    mp3_count += 1
+                                                    current_run["steps"]["9B"]["output"] = f"Downloading song {mp3_count}..."
+                                                    try:
+                                                        audio_resp = requests.get(audio_url, timeout=120)
+                                                        if audio_resp.status_code == 200 and len(audio_resp.content) > 1000:
+                                                            if mp3_count == 1:
+                                                                current_run["files"]["mp3_1"] = audio_resp.content
+                                                                download_links.append(f'<a href="/download/mp3_1" target="_blank">🎵 Download Song 1 ({len(audio_resp.content)//1024}KB)</a>')
+                                                            else:
+                                                                current_run["files"]["mp3_2"] = audio_resp.content
+                                                                download_links.append(f'<a href="/download/mp3_2" target="_blank">🎵 Download Song 2 ({len(audio_resp.content)//1024}KB)</a>')
                                                         else:
-                                                            current_run["files"]["mp3_2"] = audio_resp.content
-                                                            download_links.append(f'<a href="/download/mp3_2" target="_blank">🎵 Download Song 2 ({len(audio_resp.content)//1024}KB)</a>')
-                                                except Exception as dl_err:
-                                                    download_links.append(f'<a href="{audio_url}" target="_blank">🔗 External: Song {mp3_count}</a>')
+                                                            download_links.append(f'<a href="{audio_url}" target="_blank">🔗 Direct Link: Song {mp3_count}</a>')
+                                                    except Exception as dl_err:
+                                                        download_links.append(f'<a href="{audio_url}" target="_blank">🔗 External: Song {mp3_count}</a>')
+                                            else:
+                                                # Try to extract from response data directly
+                                                data = status_data.get('data', {})
+                                                response_data = data.get('response', {}).get('data', [])
+                                                if isinstance(response_data, list):
+                                                    for idx, item in enumerate(response_data[:2]):
+                                                        if isinstance(item, dict):
+                                                            audio_url = item.get('audio_url') or item.get('audioUrl') or item.get('stream_audio_url')
+                                                            if audio_url:
+                                                                mp3_count += 1
+                                                                download_links.append(f'<a href="{audio_url}" target="_blank">🔗 Song {mp3_count}</a>')
                                             
                                             if download_links:
                                                 current_run["steps"]["9B"]["output"] = f"✅ Audio generated!\n\n" + "\n".join(download_links)
                                             else:
-                                                current_run["steps"]["9B"]["output"] = f"Audio complete but no URLs found"
+                                                # Show response for debugging
+                                                current_run["steps"]["9B"]["output"] = f"Audio complete but no download URLs found.\nResponse: {str(status_data.get('data', {}))[:500]}"
                                             break
                                             
                                         elif task_status in ['FAILED', 'failed', 'ERROR', 'error']:
