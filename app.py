@@ -956,7 +956,7 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
                 }
                 
                 current_run["steps"]["9B"]["output"] = "Submitting to Suno V5..."
-                response = requests.post(SUNO_API_URL, headers=suno_headers, json=payload, timeout=60)
+                response = requests.post(SUNO_API_URL, headers=suno_headers, json=payload, timeout=30)  # Match notebook
                 
                 if response.status_code in [200, 201]:
                     result = response.json()
@@ -1073,7 +1073,7 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
                 }
                 
                 current_run["steps"]["10"]["output"] = "Creating presentation..."
-                gamma_response = requests.post(f"{GAMMA_BASE_URL}/generations", headers=gamma_headers, json=gamma_payload, timeout=120)
+                gamma_response = requests.post(f"{GAMMA_BASE_URL}/generations", headers=gamma_headers, json=gamma_payload, timeout=60)  # Match notebook
                 
                 if gamma_response.status_code in [200, 201]:
                     gamma_result = gamma_response.json()
