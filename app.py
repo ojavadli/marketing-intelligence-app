@@ -471,44 +471,101 @@ Relevant (>0.7): {len(relevant_posts)} posts
 Subreddits discovered: {len(discovered_subreddits)}"""
         current_run["steps"]["3"]["status"] = "completed"
         
-        # STEP 4: Ranking Agent
+        # STEP 4: RANKING AGENT - EXACT MATCH TO NOTEBOOK
         current_run["steps"]["4"]["status"] = "running"
+        current_run["steps"]["4"]["output"] = "Analyzing posts..."
         
-        posts_for_analysis = []
-        for idx, post in enumerate(reddit_posts[:100], 1):
-            posts_for_analysis.append({
-                "post_id": idx,
-                "title": post.get('title', '')[:300],
-                "subreddit": post.get('subreddit', ''),
-                "upvotes": post.get('score', post.get('num_upvotes', 0)),
-                "comments": post.get('num_comments', 0)
-            })
-        
-        ranking_prompt = f"""Analyze {len(posts_for_analysis)} Reddit posts for {business_name}.
-Posts: {json.dumps(posts_for_analysis, indent=2)[:3000]}
-Return JSON with: {{"total_posts_analyzed": {len(reddit_posts)}, "ranked_posts": [...top 10...], "pain_points": [{{"pain": "specific pain", "supporting_posts": [1,2,3]}}], "overall_trends": [{{"trend": "specific trend", "supporting_posts": [1,2,3]}}]}}"""
-        
-        try:
-            ranked_data = json.loads(llm_json.invoke([HumanMessage(content=ranking_prompt)]).content)
-        except:
-            ranked_data = {"total_posts_analyzed": len(reddit_posts), "pain_points": [], "overall_trends": []}
-        
-        pain_points_list = ranked_data.get('pain_points', [])
-        trends_list = ranked_data.get('overall_trends', [])
-        
-        pain_text = "\n".join([f"  {i+1}. {p.get('pain', p) if isinstance(p, dict) else p}" for i, p in enumerate(pain_points_list)])
-        trends_text = "\n".join([f"  {i+1}. {t.get('trend', t) if isinstance(t, dict) else t}" for i, t in enumerate(trends_list)])
-        
-        current_run["steps"]["4"]["output"] = f"""Analyzed {len(reddit_posts)} posts
+        if not reddit_posts:
+            ranked_data = {"total_posts_analyzed": 0, "pain_points": [], "overall_trends": []}
+            current_run["steps"]["4"]["output"] = "No posts to analyze"
+        else:
+            # Include post IDs for citation tracking (like notebook)
+            posts_for_analysis = []
+            for idx, post in enumerate(reddit_posts[:100], 1):
+                posts_for_analysis.append({
+                    "post_id": idx,
+                    "title": post.get('title', '')[:300],
+                    "subreddit": post.get('subreddit', ''),
+                    "url": post.get('url', ''),
+                    "upvotes": post.get('score', post.get('num_upvotes', 0)),
+                    "comments": post.get('num_comments', 0)
+                })
+            
+            # EXACT notebook prompt with full detail requirements
+            ranking_prompt = f"""Analyze {len(posts_for_analysis)} Reddit posts for {business_name}.
 
-Pain Points ({len(pain_points_list)}):
-{pain_text if pain_text else '  None identified'}
+Business: {business_name}
+Industry: {business_profile.get('industry', 'N/A')}
+Target Market: {business_profile.get('target_market', 'N/A')[:200]}
 
-Trends ({len(trends_list)}):
-{trends_text if trends_text else '  None identified'}"""
+Reddit Posts:
+{json.dumps(posts_for_analysis, indent=2)[:4000]}
+
+Extract JSON with SPECIFIC, DETAILED insights:
+{{
+  "total_posts_analyzed": {len(reddit_posts)},
+  "ranked_posts": [
+    {{"post_id": 1, "title": "...", "subreddit": "...", "relevance_score": 0.95, "key_insight": "specific insight"}},
+    ... (top 10)
+  ],
+  "pain_points": [
+    {{
+      "pain": "HIGHLY SPECIFIC pain point with numbers/details",
+      "supporting_posts": [1, 3, 5],
+      "severity": "high/medium/low"
+    }},
+    ... (5-10 pain points, each with SPECIFIC details and post citations)
+  ],
+  "overall_trends": [
+    {{
+      "trend": "SPECIFIC trend with timeframe and context",
+      "supporting_posts": [2, 4, 7, 9],
+      "momentum": "rising/stable/declining"
+    }},
+    ... (5-10 trends, each with SPECIFIC details, examples, and post citations)
+  ],
+  "sentiment_summary": "overall sentiment with specifics",
+  "subreddit_breakdown": {{"r/sub1": "specific insight", "r/sub2": "specific insight"}}
+}}
+
+CRITICAL REQUIREMENTS:
+1. Pain points MUST be HIGHLY SPECIFIC with numbers, examples, details
+2. Trends MUST include timeframe, scale, and actionable context
+3. EVERY pain/trend MUST cite supporting_posts (list of post IDs)
+4. Include severity/momentum indicators
+5. NO generic statements - only specific, detailed insights"""
+
+            try:
+                ranked_data = json.loads(llm_json.invoke([HumanMessage(content=ranking_prompt)]).content)
+            except Exception as e:
+                ranked_data = {"total_posts_analyzed": len(reddit_posts), "pain_points": [], "overall_trends": []}
+            
+            # Format output like notebook
+            pain_points_list = ranked_data.get('pain_points', [])
+            trends_list = ranked_data.get('overall_trends', [])
+            
+            output_lines = [f"✅ Analysis complete:"]
+            output_lines.append(f"   Total posts: {ranked_data.get('total_posts_analyzed', 0)}")
+            output_lines.append(f"   Top ranked: {len(ranked_data.get('ranked_posts', []))}")
+            output_lines.append(f"   Pain points: {len(pain_points_list)}")
+            output_lines.append(f"   Trends: {len(trends_list)}")
+            
+            if pain_points_list:
+                output_lines.append(f"\n📌 Top Pain Points (with citations):")
+                for idx, pain_obj in enumerate(pain_points_list[:5], 1):
+                    if isinstance(pain_obj, dict):
+                        pain_text = pain_obj.get('pain', str(pain_obj))
+                        posts = pain_obj.get('supporting_posts', [])
+                        output_lines.append(f"   {idx}. {pain_text}")
+                        output_lines.append(f"      (Posts: {posts})")
+                    else:
+                        output_lines.append(f"   {idx}. {pain_obj}")
+            
+            current_run["steps"]["4"]["output"] = "\n".join(output_lines)
+        
         current_run["steps"]["4"]["status"] = "completed"
         
-        # STEP 5: Report Generator - EXACT MATCH TO NOTEBOOK
+        # STEP 5: REPORT GENERATOR - EXACT MATCH TO NOTEBOOK (Enhanced with Quality Checklist)
         current_run["steps"]["5"]["status"] = "running"
         current_run["steps"]["5"]["output"] = "Starting report generation..."
         
