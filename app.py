@@ -696,9 +696,25 @@ Format as professional markdown report."""
             # Log for Railway debugging
             print(f"[STEP 5] Starting LLM call, prompt length: {len(report_prompt)} chars", file=sys.stderr, flush=True)
             
-            # Make LLM call (NO timeout - let it complete)
-            report_response = llm.invoke([HumanMessage(content=report_prompt)])
-            report_content = report_response.content
+            # Update output with timestamp so user knows it's working
+            import time as time_module
+            start_time = time_module.time()
+            current_run["steps"]["5"]["output"] = f"""📝 Preparing report...
+📊 Data: {pain_count} pain points, {trend_count} trends
+📅 Period: {start_date} to {end_date}
+🤖 Calling GPT-5.1... (started at {datetime.now().strftime('%H:%M:%S')})
+⏳ This typically takes 45-90 seconds. Please wait..."""
+            
+            # Make LLM call (NO timeout - let it complete, like notebook)
+            try:
+                report_response = llm.invoke([HumanMessage(content=report_prompt)])
+                report_content = report_response.content
+                elapsed = time_module.time() - start_time
+                print(f"[STEP 5] LLM call completed in {elapsed:.1f}s", file=sys.stderr, flush=True)
+            except Exception as llm_error:
+                elapsed = time_module.time() - start_time
+                print(f"[STEP 5] LLM call FAILED after {elapsed:.1f}s: {str(llm_error)}", file=sys.stderr, flush=True)
+                raise
             
             print(f"[STEP 5] LLM call completed, response length: {len(report_content)} chars", file=sys.stderr, flush=True)
             
