@@ -1103,20 +1103,23 @@ Format with [Intro], [Verse 1], [Chorus], etc."""
                                         gamma_url = status_data.get("gammaUrl") or status_data.get("url") or status_data.get("viewUrl")
                                         pptx_url = status_data.get("exportUrl") or status_data.get("pptxUrl") or status_data.get("downloadUrl")
                                         
-                                        output_parts = ["Presentation generated successfully!"]
+                                        output_parts = ["✅ Presentation generated!"]
                                         
                                         if gamma_url:
                                             current_run["files"]["gamma_url"] = gamma_url
-                                            output_parts.append(f'\n\n<a href="{gamma_url}" target="_blank">Open in Gamma.app</a>')
+                                            output_parts.append(f'\n\n🌐 <a href="{gamma_url}" target="_blank">View in Gamma.app</a>')
                                         
                                         if pptx_url:
+                                            output_parts.append(f'\n📥 <a href="{pptx_url}" target="_blank">Download PPTX</a>')
                                             try:
-                                                pptx_resp = requests.get(pptx_url, timeout=120)
-                                                if pptx_resp.status_code == 200:
+                                                pptx_resp = requests.get(pptx_url, timeout=60)
+                                                if pptx_resp.status_code == 200 and len(pptx_resp.content) > 1000:
                                                     current_run["files"]["pptx"] = pptx_resp.content
-                                                    output_parts.append('\n<a href="/download/pptx" target="_blank">Download PPTX Presentation</a>')
-                                            except Exception as dl_err:
-                                                output_parts.append(f'\n<a href="{pptx_url}" target="_blank">External PPTX Download</a>')
+                                            except:
+                                                pass
+                                        
+                                        if not gamma_url and not pptx_url:
+                                            output_parts.append(f"\nNo links. Debug: {str(status_data)[:100]}")
                                         
                                         current_run["steps"]["10"]["output"] = "".join(output_parts)
                                         break
