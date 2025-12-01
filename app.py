@@ -649,142 +649,152 @@ Details: {error_details[:300]}"""
         
         current_run["steps"]["5"]["status"] = "completed"
         
-        # STEP 6: PDF Generator - Matching notebook style
+        # STEP 6: PDF Generator - EXACT MATCH TO NOTEBOOK (using reportlab)
         current_run["steps"]["6"]["status"] = "running"
+        current_run["steps"]["6"]["output"] = "Generating PDF with reportlab..."
         
         try:
-            from fpdf import FPDF
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+            from reportlab.lib import colors
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+            from reportlab.lib.units import inch
             import re
+            import io
             
-            # Helper to clean text for PDF
-            def clean_text(text):
-                replacements = {
-                    '\u2014': '-', '\u2013': '-', '\u2018': "'", '\u2019': "'",
-                    '\u201c': '"', '\u201d': '"', '\u2026': '...', '\u2022': '*',
-                    '\u25a0': '-', '\u2011': '-', '\u00a0': ' ', '\u00b7': '*',
-                }
-                for old, new in replacements.items():
-                    text = text.replace(old, new)
-                return text.encode('ascii', 'replace').decode('ascii')
+            # Create PDF in memory for Railway
+            pdf_buffer = io.BytesIO()
+            doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, leftMargin=0.75*inch, rightMargin=0.75*inch, topMargin=0.75*inch, bottomMargin=0.75*inch)
+            styles = getSampleStyleSheet()
+            story = []
             
-            pdf = FPDF()
-            pdf.set_margins(25, 25, 25)  # 1 inch margins like notebook
-            pdf.add_page()
-            pdf.set_auto_page_break(auto=True, margin=25)
+            # Custom styles (exact match to notebook)
+            title_style = ParagraphStyle('CustomTitle', parent=styles['Title'], fontSize=22, textColor=colors.HexColor('#1565C0'), alignment=TA_CENTER, fontName='Helvetica-Bold', spaceAfter=20)
+            subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=11, textColor=colors.HexColor('#666666'), alignment=TA_CENTER, fontName='Helvetica-Oblique', spaceAfter=10)
             
-            # Title - Blue color like notebook
-            pdf.set_font('Helvetica', 'B', 24)
-            pdf.set_text_color(21, 101, 192)  # #1565C0 blue
-            pdf.cell(0, 15, clean_text(f"Marketing Intelligence Report:"), ln=True, align='C')
-            pdf.cell(0, 15, clean_text(business_name), ln=True, align='C')
-            pdf.ln(8)
+            # Section header styles
+            pain_header = ParagraphStyle('PainHeader', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#8B0000'), fontName='Helvetica-Bold', spaceBefore=18, spaceAfter=12)
+            action_header = ParagraphStyle('ActionHeader', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#006400'), fontName='Helvetica-Bold', spaceBefore=18, spaceAfter=12)
+            default_header = ParagraphStyle('DefaultHeader', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#1565C0'), fontName='Helvetica-Bold', spaceBefore=18, spaceAfter=12)
+            subheader_style = ParagraphStyle('Subheader', parent=styles['Heading2'], fontSize=13, textColor=colors.HexColor('#333333'), fontName='Helvetica-Bold', spaceBefore=12, spaceAfter=8)
+            
+            # Body text styles
+            body_normal = ParagraphStyle('BodyNormal', parent=styles['Normal'], fontSize=10, leading=14, textColor=colors.black, alignment=TA_JUSTIFY, spaceAfter=8)
+            body_pain = ParagraphStyle('BodyPain', parent=styles['Normal'], fontSize=10, leading=14, textColor=colors.HexColor('#8B0000'), alignment=TA_JUSTIFY, spaceAfter=8)
+            body_action = ParagraphStyle('BodyAction', parent=styles['Normal'], fontSize=10, leading=14, textColor=colors.HexColor('#006400'), alignment=TA_JUSTIFY, spaceAfter=8)
+            
+            def process_markdown_line(line, current_section):
+                # Escape special XML characters
+                line = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                # Replace markdown links with styled text
+                def replace_link(match):
+                    text = match.group(1)
+                    return f'<font size="9" color="#808080"><i>[{text}]</i></font>'
+                line = re.sub(r'\[([^\]]+)\]\([^)]+\)', replace_link, line)
+                # Handle bold/italic
+                line = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', line)
+                line = re.sub(r'\*([^*]+)\*', r'<i>\1</i>', line)
+                return line
+            
+            # Title
+            story.append(Paragraph(f"<b>Marketing Intelligence Report: {business_name}</b>", title_style))
+            story.append(Spacer(1, 0.2*inch))
             
             # Metadata
-            pdf.set_font('Helvetica', 'I', 11)
-            pdf.set_text_color(100, 100, 100)
-            pdf.cell(0, 6, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
-            pdf.cell(0, 6, "Analysis Period: Past 7 days", ln=True, align='C')
-            pdf.ln(15)
+            meta_text = f"<i>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Analysis Period: Past 7 days</i>"
+            story.append(Paragraph(meta_text, subtitle_style))
+            story.append(Spacer(1, 0.4*inch))
             
-            # Process report line by line
+            # Track current section
             current_section = "normal"
             
-            for line in final_report.split('\n'):
+            # Process report line by line
+            lines = final_report.split('\n')
+            for line in lines:
                 line = line.strip()
-                if not line or line == '---':
-                    pdf.ln(3)
+                if not line or line == '---' or line.startswith('Generated:'):
                     continue
                 
-                line = clean_text(line)
-                line_lower = line.lower()
+                # Fix encoding
+                for old, new in [('■', '-'), ('‑', '-'), ('–', '-')]:
+                    line = line.replace(old, new)
                 
-                # Detect section headers (## or # markdown)
-                is_header = line.startswith('#') or line.startswith('**')
-                header_text = line.replace('##', '').replace('#', '').replace('**', '').strip()
+                # Main headers
+                if line.startswith('## ') or (line.startswith('# ') and 'Marketing Intelligence' not in line):
+                    header = line.replace('## ', '').replace('# ', '').strip()
+                    if any(w in header.lower() for w in ['pain', 'concern', 'issue', 'problem']):
+                        current_section = "pain"
+                        story.append(Paragraph(f"<b>{header}</b>", pain_header))
+                    elif any(w in header.lower() for w in ['action', 'recommend', 'suggestion']):
+                        current_section = "action"
+                        story.append(Paragraph(f"<b>{header}</b>", action_header))
+                    else:
+                        current_section = "normal"
+                        story.append(Paragraph(f"<b>{header}</b>", default_header))
+                    story.append(Spacer(1, 0.15*inch))
                 
-                try:
-                    if is_header:
-                        pdf.ln(8)
-                        pdf.set_font('Helvetica', 'B', 16)
-                        
-                        # Color code by section type
-                        if any(w in line_lower for w in ['pain', 'concern', 'issue', 'problem']):
-                            current_section = "pain"
-                            pdf.set_text_color(139, 0, 0)  # Dark red
-                        elif any(w in line_lower for w in ['trend', 'emerging', 'topic']):
-                            current_section = "trend"
-                            pdf.set_text_color(0, 0, 139)  # Dark blue
-                        elif any(w in line_lower for w in ['action', 'recommend', 'suggestion']):
-                            current_section = "action"
-                            pdf.set_text_color(0, 100, 0)  # Dark green
-                        elif 'executive' in line_lower or 'summary' in line_lower:
-                            current_section = "summary"
-                            pdf.set_text_color(0, 0, 0)  # Black
-                        else:
-                            pdf.set_text_color(0, 0, 0)
-                        
-                        pdf.multi_cell(0, 8, header_text[:150])
-                        pdf.ln(4)
-                    
-                    # Links [text](url) - display in gray italic like notebook
-                    elif '[' in line and '](' in line:
-                        import re as regex
-                        match = regex.search(r'\[(.+?)\]\((.+?)\)', line)
-                        if match:
-                            link_desc = match.group(1)
-                            url = match.group(2)
-                            pdf.set_font('Helvetica', 'I', 9)
-                            pdf.set_text_color(128, 128, 128)  # Gray
-                            pdf.multi_cell(0, 5, f"{link_desc}")
-                            pdf.set_font('Helvetica', '', 8)
-                            pdf.multi_cell(0, 4, url[:80])
-                            pdf.ln(2)
-                        else:
-                            pdf.set_font('Helvetica', '', 11)
-                            pdf.set_text_color(40, 40, 40)
-                            pdf.multi_cell(0, 6, line[:500])
-                    
-                    # Numbered items (1. 2. 3.)
-                    elif re.match(r'^\d+\.', line):
-                        pdf.set_font('Helvetica', 'B', 13)
-                        if current_section == "pain":
-                            pdf.set_text_color(139, 0, 0)
-                        elif current_section == "trend":
-                            pdf.set_text_color(0, 0, 139)
-                        elif current_section == "action":
-                            pdf.set_text_color(0, 100, 0)
-                        else:
-                            pdf.set_text_color(0, 0, 0)
-                        pdf.multi_cell(0, 7, line[:300])
-                        pdf.ln(3)
-                    
-                    # Regular body text
-                    elif len(line) > 3:
-                        pdf.set_font('Helvetica', '', 11)
-                        if current_section == "pain":
-                            pdf.set_text_color(60, 60, 60)
-                        elif current_section == "trend":
-                            pdf.set_text_color(60, 60, 60)
-                        elif current_section == "action":
-                            pdf.set_text_color(60, 60, 60)
-                        else:
-                            pdf.set_text_color(40, 40, 40)
-                        pdf.multi_cell(0, 6, line[:500])
-                        pdf.ln(2)
-                except:
-                    pass
+                # Subheaders
+                elif line.startswith('### '):
+                    subheader = line.replace('### ', '').strip()
+                    story.append(Paragraph(f"<b>{subheader}</b>", subheader_style))
+                    story.append(Spacer(1, 0.1*inch))
+                
+                # Skip title header duplicate
+                elif line.startswith('# '):
+                    continue
+                
+                # Bold numbered items
+                elif line.startswith('**') and re.match(r'^\*\*\d+\.', line):
+                    clean = line.replace('**', '').strip()
+                    if current_section == "pain":
+                        item_style = ParagraphStyle('PainItem', parent=subheader_style, textColor=colors.HexColor('#8B0000'))
+                    elif current_section == "action":
+                        item_style = ParagraphStyle('ActionItem', parent=subheader_style, textColor=colors.HexColor('#006400'))
+                    else:
+                        item_style = subheader_style
+                    story.append(Paragraph(f"<b>{clean}</b>", item_style))
+                    story.append(Spacer(1, 0.08*inch))
+                
+                # Regular paragraph text
+                elif len(line) > 3:
+                    processed = process_markdown_line(line, current_section)
+                    if current_section == "pain":
+                        text_style = body_pain
+                    elif current_section == "action":
+                        text_style = body_action
+                    else:
+                        text_style = body_normal
+                    try:
+                        story.append(Paragraph(processed, text_style))
+                        story.append(Spacer(1, 0.06*inch))
+                    except:
+                        simple_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', line)
+                        simple_text = simple_text.replace('**', '').replace('*', '')
+                        try:
+                            story.append(Paragraph(simple_text, text_style))
+                        except:
+                            pass
             
-            pdf_bytes = pdf.output()
-            current_run["files"]["pdf"] = pdf_bytes
+            # Build PDF
+            doc.build(story)
             
-            current_run["steps"]["6"]["output"] = f"""PDF Report Generated!
-Size: {len(current_run["files"]["pdf"])} bytes
-Style: Color-coded sections (Pain=Red, Trends=Blue, Actions=Green)
+            # Store PDF content for download
+            pdf_buffer.seek(0)
+            current_run["files"]["pdf"] = pdf_buffer.read()
+            
+            pdf_size_kb = len(current_run["files"]["pdf"]) / 1024
+            current_run["steps"]["6"]["output"] = f"""✅ PDF Generated Successfully!
+📝 Size: {pdf_size_kb:.1f} KB
+🎨 Pain Points: Dark Red (#8B0000)
+🎨 Recommendations: Dark Green (#006400)
+🔗 Links: 9pt, italic, grey (#808080)
 
-<a href="/download/pdf" target="_blank">Download PDF Report</a>"""
+<a href="/download/pdf" target="_blank">📥 Download PDF Report</a>"""
             
         except Exception as e:
-            current_run["steps"]["6"]["output"] = f"PDF generation failed: {str(e)[:100]}"
+            import traceback
+            current_run["steps"]["6"]["output"] = f"PDF generation failed: {str(e)}\n{traceback.format_exc()[:300]}"
         
         current_run["steps"]["6"]["status"] = "completed"
         
