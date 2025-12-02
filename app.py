@@ -564,10 +564,18 @@ CRITICAL REQUIREMENTS:
 4. Include severity/momentum indicators
 5. NO generic statements - only specific, detailed insights"""
 
+            # Update output BEFORE LLM call so user sees progress
+            current_run["steps"]["4"]["output"] = f"🔄 Analyzing {len(posts_for_analysis)} posts with GPT-5.1..."
+            print(f"[STEP 4] Starting LLM call, posts: {len(posts_for_analysis)}", file=sys.stderr, flush=True)
+            
             try:
-                ranked_data = json.loads(llm_json.invoke([HumanMessage(content=ranking_prompt)]).content)
+                response = llm_json.invoke([HumanMessage(content=ranking_prompt)])
+                ranked_data = json.loads(response.content)
+                print(f"[STEP 4] LLM call completed successfully", file=sys.stderr, flush=True)
             except Exception as e:
+                print(f"[STEP 4] LLM call FAILED: {str(e)}", file=sys.stderr, flush=True)
                 ranked_data = {"total_posts_analyzed": len(reddit_posts), "pain_points": [], "overall_trends": []}
+                current_run["steps"]["4"]["output"] = f"⚠️ Analysis had issues: {str(e)[:100]}"
             
             # Format output like notebook
             pain_points_list = ranked_data.get('pain_points', [])
