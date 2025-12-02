@@ -124,9 +124,9 @@ GAMMA_API_KEY = os.environ.get('GAMMA_API_KEY', '')
 if not OPENAI_API_KEY:
     print("WARNING: OPENAI_API_KEY not set!")
 
-# Add request_timeout for Railway to prevent hanging (notebook runs locally, no timeout needed there)
-llm_json = ChatOpenAI(model='gpt-5.1', temperature=0, model_kwargs={'response_format': {'type': 'json_object'}}, api_key=OPENAI_API_KEY, request_timeout=120)
-llm = ChatOpenAI(model='gpt-5.1', temperature=0.1, api_key=OPENAI_API_KEY, request_timeout=180)
+# EXACT match to notebook - NO timeouts
+llm_json = ChatOpenAI(model='gpt-5.1', temperature=0, model_kwargs={'response_format': {'type': 'json_object'}}, api_key=OPENAI_API_KEY)
+llm = ChatOpenAI(model='gpt-5.1', temperature=0.1, api_key=OPENAI_API_KEY)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 # ============================================================================
@@ -569,18 +569,14 @@ CRITICAL REQUIREMENTS:
             print(f"[STEP 4] Starting LLM call, posts: {len(posts_for_analysis)}", file=sys.stderr, flush=True)
             
             try:
-                # request_timeout=120 in LLM init handles timeout
-                response = llm_json.invoke([HumanMessage(content=ranking_prompt)])
-                ranked_data = json.loads(response.content)
+                # EXACT match to notebook: timeout=15 on invoke()
+                ranked_data = json.loads(llm_json.invoke([HumanMessage(content=ranking_prompt)], timeout=15).content)
                 print(f"[STEP 4] LLM call completed successfully", file=sys.stderr, flush=True)
             except Exception as e:
                 error_msg = str(e)
                 print(f"[STEP 4] LLM call FAILED: {error_msg}", file=sys.stderr, flush=True)
                 ranked_data = {"total_posts_analyzed": len(reddit_posts), "pain_points": [], "overall_trends": []}
-                if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
-                    current_run["steps"]["4"]["output"] = f"⚠️ Analysis timed out. Using fallback data."
-                else:
-                    current_run["steps"]["4"]["output"] = f"⚠️ Analysis error: {error_msg[:150]}"
+                current_run["steps"]["4"]["output"] = f"⚠️ Analysis issue: {error_msg[:100]}"
             
             # Format output like notebook
             pain_points_list = ranked_data.get('pain_points', [])
@@ -719,19 +715,14 @@ Format as professional markdown report."""
 ⏳ This typically takes 45-90 seconds. Please wait..."""
             
             try:
-                # request_timeout=180 in LLM init handles timeout
-                report_response = llm.invoke([HumanMessage(content=report_prompt)])
-                report_content = report_response.content
+                # EXACT match to notebook: llm.invoke() with NO timeout
+                report_content = llm.invoke([HumanMessage(content=report_prompt)]).content
                 elapsed = time_module.time() - start_time
                 print(f"[STEP 5] LLM call completed in {elapsed:.1f}s", file=sys.stderr, flush=True)
             except Exception as llm_error:
                 elapsed = time_module.time() - start_time
-                error_msg = str(llm_error)
-                print(f"[STEP 5] LLM call FAILED after {elapsed:.1f}s: {error_msg}", file=sys.stderr, flush=True)
-                if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
-                    report_content = f"# Report for {business_name}\n\nReport generation timed out. Please try again."
-                else:
-                    raise
+                print(f"[STEP 5] LLM call FAILED after {elapsed:.1f}s: {str(llm_error)}", file=sys.stderr, flush=True)
+                raise
             
             print(f"[STEP 5] LLM call completed, response length: {len(report_content)} chars", file=sys.stderr, flush=True)
             
