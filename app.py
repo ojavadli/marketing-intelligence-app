@@ -1374,22 +1374,24 @@ def debug_info():
 
 @app.route('/test-llm')
 def test_llm():
-    """Quick test of LLM connectivity"""
+    """Quick test of LLM connectivity - tests gpt-5.1 specifically"""
     try:
         from langchain_openai import ChatOpenAI
         from langchain.schema import HumanMessage
         import os
         
+        # Test with exact model used in app
         test_llm = ChatOpenAI(
-            model='gpt-4o-mini', 
+            model='gpt-5.1', 
             temperature=0, 
             api_key=os.environ.get('OPENAI_API_KEY', ''),
-            request_timeout=10
+            request_timeout=30
         )
         response = test_llm.invoke([HumanMessage(content="Say 'OK' only")])
-        return jsonify({"success": True, "response": response.content[:50]})
+        return jsonify({"success": True, "model": "gpt-5.1", "response": response.content[:50]})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        import traceback
+        return jsonify({"success": False, "model": "gpt-5.1", "error": str(e), "traceback": traceback.format_exc()[:500]})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
