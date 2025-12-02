@@ -77,12 +77,7 @@ Marketing Intelligence Team
             part.add_header('Content-Disposition', f'attachment; filename="{safe_name}_song_1.mp3"')
             msg.attach(part)
         
-        if mp3_2_bytes:
-            part = MIMEBase('audio', 'mpeg')
-            part.set_payload(mp3_2_bytes)
-            encoders.encode_base64(part)
-            part.add_header('Content-Disposition', f'attachment; filename="{safe_name}_song_2.mp3"')
-            msg.attach(part)
+        # mp3_2 removed to stay under email size limit (only sending 1 MP3)
         
         # Attach PPTX
         if pptx_bytes:
@@ -371,12 +366,17 @@ IMPORTANT: Create a MIX of keyword types:
 - ~60 keywords about the industry/category (generic industry terms)
 - ~60 keywords about pain points and use cases (problems users discuss)
 
-Example for a small influencer marketing company:
-- "influencer marketing platform" (generic)
-- "micro influencer collaboration" (use case)
-- "ugc creator marketplace" (category)
-- "[competitor] vs [other]" (competitor)
-- "[business] review" (branded)
+Example patterns (adapt to the business type):
+- "[business] price increase" (pricing)
+- "[business] quality decline" (quality)
+- "[business] customer service" (service)
+- "[business] wait times" (experience)
+- "[business] vs [competitor]" (competitive)
+- "best [category] for [audience]" (generic)
+- "[category] worth the money" (value)
+- "alternative to [business]" (switching)
+- "[business] rewards program" (loyalty)
+- "overpriced [category]" (pain point)
 
 Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         
@@ -692,6 +692,13 @@ QUALITY REQUIREMENTS:
 ✓ All recommendations are specific and actionable
 ✓ Use markdown formatting with proper headers
 ✓ Include clickable Reddit URLs
+
+GROUNDING REQUIREMENTS (CRITICAL):
+✓ ONLY make claims that are DIRECTLY supported by the provided Reddit posts
+✓ Do NOT invent or hallucinate information not present in the data
+✓ Every statement must be traceable to a specific post or comment
+✓ If data is insufficient for a section, state "Insufficient data" rather than fabricating
+✓ Quote actual user language when possible to ensure authenticity
 
 CRITICAL: Ensure you address ALL original GOAL objectives:
 - Customer pain points ✓
