@@ -366,17 +366,17 @@ IMPORTANT: Create a MIX of keyword types:
 - ~60 keywords about the industry/category (generic industry terms)
 - ~60 keywords about pain points and use cases (problems users discuss)
 
-Example patterns (adapt to the business type):
-- "[business] price increase" (pricing)
-- "[business] quality decline" (quality)
-- "[business] customer service" (service)
-- "[business] wait times" (experience)
+Example patterns (ADAPT to the specific business/industry):
+- "[business] review 2024" (brand search)
+- "[business] worth it" (value assessment)
 - "[business] vs [competitor]" (competitive)
-- "best [category] for [audience]" (generic)
-- "[category] worth the money" (value)
+- "best [category]" (industry generic)
+- "[business] complaints" (pain points)
 - "alternative to [business]" (switching)
-- "[business] rewards program" (loyalty)
-- "overpriced [category]" (pain point)
+- "[business] quality issues" (problems)
+- "should I buy [business]" (purchase intent)
+- "[category] recommendations" (industry)
+- "[business] disappointed" (negative sentiment)
 
 Return JSON: {{"keywords": ["keyword1", "keyword2", ...] (200 total)}}"""
         
