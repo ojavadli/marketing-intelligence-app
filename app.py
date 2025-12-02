@@ -1356,6 +1356,41 @@ print(f"======================")
 def health():
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
+
+@app.route('/debug')
+def debug_info():
+    """Debug endpoint to check configuration"""
+    import os
+    return jsonify({
+        "openai_key_set": bool(os.environ.get('OPENAI_API_KEY', '')),
+        "openai_key_length": len(os.environ.get('OPENAI_API_KEY', '')),
+        "tavily_key_set": bool(os.environ.get('TAVILY_API_KEY', '')),
+        "suno_key_set": bool(os.environ.get('SUNO_API_KEY', '')),
+        "gamma_key_set": bool(os.environ.get('GAMMA_API_KEY', '')),
+        "current_status": current_run.get("status", "unknown"),
+        "business_name": current_run.get("business_name", ""),
+        "steps_status": {k: v.get("status") for k, v in current_run.get("steps", {}).items()}
+    })
+
+@app.route('/test-llm')
+def test_llm():
+    """Quick test of LLM connectivity"""
+    try:
+        from langchain_openai import ChatOpenAI
+        from langchain.schema import HumanMessage
+        import os
+        
+        test_llm = ChatOpenAI(
+            model='gpt-4o-mini', 
+            temperature=0, 
+            api_key=os.environ.get('OPENAI_API_KEY', ''),
+            request_timeout=10
+        )
+        response = test_llm.invoke([HumanMessage(content="Say 'OK' only")])
+        return jsonify({"success": True, "response": response.content[:50]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
