@@ -124,9 +124,9 @@ GAMMA_API_KEY = os.environ.get('GAMMA_API_KEY', '')
 if not OPENAI_API_KEY:
     print("WARNING: OPENAI_API_KEY not set!")
 
-# EXACT MATCH TO NOTEBOOK - no timeout, but explicit api_key for Railway environment
-llm_json = ChatOpenAI(model='gpt-5.1', temperature=0, model_kwargs={'response_format': {'type': 'json_object'}}, api_key=OPENAI_API_KEY)
-llm = ChatOpenAI(model='gpt-5.1', temperature=0.1, api_key=OPENAI_API_KEY)
+# Add request_timeout for Railway to prevent hanging (notebook runs locally, no timeout needed there)
+llm_json = ChatOpenAI(model='gpt-5.1', temperature=0, model_kwargs={'response_format': {'type': 'json_object'}}, api_key=OPENAI_API_KEY, request_timeout=120)
+llm = ChatOpenAI(model='gpt-5.1', temperature=0.1, api_key=OPENAI_API_KEY, request_timeout=180)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 # ============================================================================
@@ -568,26 +568,19 @@ CRITICAL REQUIREMENTS:
             current_run["steps"]["4"]["output"] = f"🔄 Analyzing {len(posts_for_analysis)} posts with GPT-5.1..."
             print(f"[STEP 4] Starting LLM call, posts: {len(posts_for_analysis)}", file=sys.stderr, flush=True)
             
-            # Use ThreadPoolExecutor for hard timeout (prevents indefinite hanging)
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-            
-            def make_llm_call():
-                return llm_json.invoke([HumanMessage(content=ranking_prompt)])
-            
             try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(make_llm_call)
-                    response = future.result(timeout=120)  # 2 minute hard timeout
+                # request_timeout=120 in LLM init handles timeout
+                response = llm_json.invoke([HumanMessage(content=ranking_prompt)])
                 ranked_data = json.loads(response.content)
                 print(f"[STEP 4] LLM call completed successfully", file=sys.stderr, flush=True)
-            except FuturesTimeoutError:
-                print(f"[STEP 4] LLM call TIMED OUT after 120s", file=sys.stderr, flush=True)
-                ranked_data = {"total_posts_analyzed": len(reddit_posts), "pain_points": [], "overall_trends": []}
-                current_run["steps"]["4"]["output"] = f"⚠️ Analysis timed out (120s). Using fallback."
             except Exception as e:
-                print(f"[STEP 4] LLM call FAILED: {str(e)}", file=sys.stderr, flush=True)
+                error_msg = str(e)
+                print(f"[STEP 4] LLM call FAILED: {error_msg}", file=sys.stderr, flush=True)
                 ranked_data = {"total_posts_analyzed": len(reddit_posts), "pain_points": [], "overall_trends": []}
-                current_run["steps"]["4"]["output"] = f"⚠️ Analysis error: {str(e)[:100]}"
+                if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+                    current_run["steps"]["4"]["output"] = f"⚠️ Analysis timed out. Using fallback data."
+                else:
+                    current_run["steps"]["4"]["output"] = f"⚠️ Analysis error: {error_msg[:150]}"
             
             # Format output like notebook
             pain_points_list = ranked_data.get('pain_points', [])
@@ -725,27 +718,20 @@ Format as professional markdown report."""
 🤖 Calling GPT-5.1... (started at {datetime.now().strftime('%H:%M:%S')})
 ⏳ This typically takes 45-90 seconds. Please wait..."""
             
-            # Use ThreadPoolExecutor for hard timeout (prevents indefinite hanging)
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-            
-            def make_report_call():
-                return llm.invoke([HumanMessage(content=report_prompt)])
-            
             try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(make_report_call)
-                    report_response = future.result(timeout=180)  # 3 minute hard timeout
+                # request_timeout=180 in LLM init handles timeout
+                report_response = llm.invoke([HumanMessage(content=report_prompt)])
                 report_content = report_response.content
                 elapsed = time_module.time() - start_time
                 print(f"[STEP 5] LLM call completed in {elapsed:.1f}s", file=sys.stderr, flush=True)
-            except FuturesTimeoutError:
-                elapsed = time_module.time() - start_time
-                print(f"[STEP 5] LLM call TIMED OUT after {elapsed:.1f}s", file=sys.stderr, flush=True)
-                report_content = f"# Report for {business_name}\n\nReport generation timed out after 3 minutes. Please try again."
             except Exception as llm_error:
                 elapsed = time_module.time() - start_time
-                print(f"[STEP 5] LLM call FAILED after {elapsed:.1f}s: {str(llm_error)}", file=sys.stderr, flush=True)
-                raise
+                error_msg = str(llm_error)
+                print(f"[STEP 5] LLM call FAILED after {elapsed:.1f}s: {error_msg}", file=sys.stderr, flush=True)
+                if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+                    report_content = f"# Report for {business_name}\n\nReport generation timed out. Please try again."
+                else:
+                    raise
             
             print(f"[STEP 5] LLM call completed, response length: {len(report_content)} chars", file=sys.stderr, flush=True)
             
